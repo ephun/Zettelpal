@@ -31,8 +31,8 @@ ENV/
 *.swp
 *.swo
 
-# PyInstaller
-*.spec
+# PyInstaller build artifacts (keep .spec files)
+# *.spec
 
 # Logs
 *.log
@@ -64,3 +64,14 @@ Desktop.ini
 
 # Temporary test files
 asdf*.py
+
+# Vestigial code
+mistral/
+gemini/
+
+# Claude Code settings
+.claude/
+
+# Windows shortcuts and batch files
+*.lnk
+run_zettelpal.bat

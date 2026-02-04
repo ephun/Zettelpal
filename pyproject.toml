@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zettelpal"
+version = "2.0.0"
+description = "Privacy-focused audio-to-Obsidian notes pipeline using local models"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Ethan"}
+]
+keywords = [
+    "obsidian",
+    "zettelkasten",
+    "audio",
+    "transcription",
+    "whisper",
+    "local-llm",
+    "privacy"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Text Processing :: General",
+]
+dependencies = [
+    "openai-whisper>=20231117",
+    "sentence-transformers>=2.2.2",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "scikit-learn>=1.3.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0.0",
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+zettelpal = "zettelpal:main"
+
+[project.gui-scripts]
+zettelpal-gui = "gui:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/zettelpal"
+Repository = "https://github.com/yourusername/zettelpal"
+
+[tool.setuptools]
+py-modules = [
+    "zettelpal",
+    "config",
+    "utils",
+    "transcribe",
+    "segment",
+    "classify",
+    "create_notes",
+    "link_notes",
+    "delete_notes",
+    "gui",
+]
+
+[tool.setuptools.package-data]
+"*" = ["*.ico"]

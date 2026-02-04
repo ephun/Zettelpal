@@ -1,7 +1,8 @@
-# gui.py
+# gui.py - Zettelpal GUI
+# Modern tkinter interface for the Zettelpal pipeline
 
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox, ttk # Import ttk for Notebook
+from tkinter import filedialog, scrolledtext, messagebox, ttk
 import threading
 import queue
 import os
@@ -10,9 +11,7 @@ import datetime
 import re
 import shutil
 import json
-import inspect # For inspecting module to get configurable values
 
-# Import core Zettelpal functions and config
 import config
 import transcribe
 import segment
@@ -21,700 +20,465 @@ import link_notes
 import utils
 import classify
 
-# --- Configuration Mapping (Defines all configurable items and their types) ---
-# This list is used to dynamically generate the settings GUI.
-CONFIGURABLE_ITEMS = [
-    # Directories (Set to 'path' type for validation/description)
-    ("OBSIDIAN_VAULT_ROOT", "path", "Absolute path to your Obsidian vault root."),
-    ("ZETTELPAL_ROOT", "path", "Root directory for Zettelpal intermediate/archive files."),
-    ("NOTES_SUBDIRECTORY_IN_VAULT", "str", "Subdirectory within the vault for generated notes."),
-    ("ARCHIVE_DIR", "path", "Directory where original audio and raw transcripts are archived."),
-    # Models & API
-    ("GOOGLE_API_KEY", "str", "Gemini API Key (preferably set via environment variable)."),
-    ("LOCAL_WHISPER_MODEL_SIZE", "str", "Local Whisper model size (e.g., 'medium', 'large-v3')."),
-    ("LOCAL_EMBEDDING_MODEL", "str", "Sentence Transformer model for embeddings (e.g., 'all-MiniLM-L6-v2')."),
-    ("SEGMENTATION_LLM_MODEL", "str", "Gemini model for segmentation and tagging (e.g., 'gemini-2.5-pro')."),
-    ("SEGMENTATION_LLM_TEMPERATURE", "float", "LLM creativity level (0.0 to 1.0)."),
-    ("SEGMENTATION_MAX_TOKENS", "int", "Max output tokens for LLM segmentation (prevent JSON cutoff)."),
-    # Linking
-    ("SIMILARITY_THRESHOLD", "float", "Default Cosine similarity cutoff for semantic linking."),
-    ("SOURCE_METADATA_KEY", "str", "YAML key for source metadata (e.g., 'source')."),
-    # LLM Prompts (Set to 'multiline' for Text widget)
-    ("CLASSIFICATION_PROMPT_TEMPLATE", "multiline", "Prompt for classifying transcript type."),
-    ("SEGMENTATION_PROMPT_TEMPLATE", "multiline", "Prompt for breaking transcript into segments and titling."),
-    ("GRANULAR_TAGGING_PROMPT_TEMPLATE", "multiline", "Prompt for generating fine-grained tags for each segment."),
-    # Hardcoded/Runtime (Include these for completeness in settings, though they live in other files)
-    ("max_chars_per_chunk (segment.py)", "int", "Max character length for LLM input chunks (in segment.py)."),
-    ("max_output_tokens (classify.py)", "int", "Max output tokens for classification prompt (in classify.py)."),
-]
-
 
 class TextRedirector:
-    """A helper class to redirect stdout to a Tkinter Text widget."""
+    """Redirects stdout/stderr to a Tkinter Text widget."""
+
     def __init__(self, widget):
         self.widget = widget
         self.queue = queue.Queue()
-        self.update_interval = 100 # ms, how often to check the queue
+        self.update_interval = 100
         self.widget.after(self.update_interval, self.update_text)
 
     def write(self, text):
         self.queue.put(text)
 
     def flush(self):
-        # Tkinter's Text widget doesn't need flushing for append operations
         pass
 
     def update_text(self):
         try:
             while True:
                 text = self.queue.get_nowait()
+                self.widget.configure(state='normal')
                 self.widget.insert(tk.END, text)
-                self.widget.see(tk.END) # Auto-scroll to the end
+                self.widget.see(tk.END)
+                self.widget.configure(state='disabled')
         except queue.Empty:
             pass
         finally:
             self.widget.after(self.update_interval, self.update_text)
 
+
 class ZettelpalGUI(tk.Tk):
+    """Main Zettelpal GUI application."""
+
     def __init__(self):
         super().__init__()
-        self.title("Zettelpal - Audio to Obsidian Notes")
+        self.title("Zettelpal")
         self.geometry("900x700")
+        self.minsize(700, 500)
 
+        # Set icon
         icon_path = os.path.join(os.path.dirname(__file__), "zettelpal.ico")
         if os.path.exists(icon_path):
             try:
                 self.iconbitmap(icon_path)
-            except tk.TclError as e:
-                print(f"Warning: Could not set icon. Error: {e}")
+            except tk.TclError:
+                pass
 
         self.audio_files = []
         self.processing_queue = queue.Queue()
         self.processing_thread = None
-        self.config_vars = {} # Dictionary to hold Tkinter variables for settings
-
-        # Configure grid weights (removed, now managed by Notebook)
 
         self.create_widgets()
-        self.redirect_stdout_to_console()
-        self.ensure_directories_gui_check()
+        self.redirect_stdout()
+        self.check_directories()
 
-    def ensure_directories_gui_check(self):
-        # ... (Same as original implementation)
-        """Performs initial directory checks and prints to console."""
-        print("Performing initial directory checks...")
+    def check_directories(self):
+        """Initial directory validation."""
+        print("Checking directories...")
         try:
-            # Zettelpal Root and its subdirectories (intermediate and archive)
             os.makedirs(config.ZETTELPAL_ROOT, exist_ok=True)
             os.makedirs(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, exist_ok=True)
             os.makedirs(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, exist_ok=True)
             os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
 
-            # Obsidian Vault related directories
             if not os.path.exists(config.OBSIDIAN_VAULT_ROOT):
-                 print(f"ERROR: Obsidian vault root not found at {config.OBSIDIAN_VAULT_ROOT}")
-                 print("Please check your config.py and ensure OBSIDIAN_VAULT_ROOT is correct.")
-                 messagebox.showerror("Configuration Error",
-                                      f"Obsidian vault root not found at {config.OBSIDIAN_VAULT_ROOT}. "
-                                      "Please check your config.py.")
-                 self.destroy() # Close the app if critical config is missing
-                 return False
+                print(f"ERROR: Obsidian vault not found: {config.OBSIDIAN_VAULT_ROOT}")
+                messagebox.showerror(
+                    "Configuration Error",
+                    f"Obsidian vault not found:\n{config.OBSIDIAN_VAULT_ROOT}"
+                )
+                return False
 
-            notes_subdir_path = os.path.join(config.OBSIDIAN_VAULT_ROOT, config.NOTES_SUBDIRECTORY_IN_VAULT)
-            os.makedirs(notes_subdir_path, exist_ok=True)
+            notes_dir = os.path.join(config.OBSIDIAN_VAULT_ROOT, config.NOTES_SUBDIRECTORY_IN_VAULT)
+            os.makedirs(notes_dir, exist_ok=True)
 
             cache_dir = os.path.dirname(config.EMBEDDINGS_CACHE_FILE)
             os.makedirs(cache_dir, exist_ok=True)
 
-            print("All necessary directories checked/created.")
+            print("All directories ready.")
+            print(f"LLM: {config.LOCAL_LLM_BASE_URL}")
+            print(f"Model: {config.LOCAL_LLM_MODEL}")
             return True
+
         except Exception as e:
-            print(f"CRITICAL ERROR during directory setup: {e}")
-            messagebox.showerror("Setup Error", f"Failed to set up directories: {e}. See console for details.")
-            self.destroy()
+            print(f"ERROR: Directory setup failed: {e}")
+            messagebox.showerror("Setup Error", str(e))
             return False
 
     def create_widgets(self):
-        # --- Top-Level Notebook (Tabs) ---
+        """Create the main UI."""
+        # Notebook for tabs
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(expand=True, fill="both", padx=10, pady=10)
 
-        # --- 1. Pipeline Tab (Main Operational View) ---
-        self.pipeline_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.pipeline_tab, text="Pipeline")
-        self.pipeline_tab.grid_rowconfigure(1, weight=1)
-        self.pipeline_tab.grid_columnconfigure(0, weight=1)
+        # === PIPELINE TAB ===
+        pipeline_tab = ttk.Frame(self.notebook)
+        self.notebook.add(pipeline_tab, text="Pipeline")
+        pipeline_tab.grid_rowconfigure(1, weight=1)
+        pipeline_tab.grid_columnconfigure(0, weight=1)
 
-        # File Selection Frame (on Pipeline Tab)
-        file_frame = tk.LabelFrame(self.pipeline_tab, text="Select Audio Files", padx=10, pady=10)
+        # File selection frame
+        file_frame = ttk.LabelFrame(pipeline_tab, text="Audio Files", padding=10)
         file_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         file_frame.grid_columnconfigure(0, weight=1)
 
-        self.file_listbox = tk.Listbox(file_frame, selectmode=tk.EXTENDED, height=5)
-        self.file_listbox.grid(row=0, column=0, columnspan=2, sticky="ew", pady=5)
+        self.file_listbox = tk.Listbox(file_frame, selectmode=tk.EXTENDED, height=4)
+        self.file_listbox.grid(row=0, column=0, columnspan=3, sticky="ew", pady=5)
 
-        add_button = tk.Button(file_frame, text="Add Files", command=self.add_files)
-        add_button.grid(row=1, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(file_frame, text="Add Files", command=self.add_files).grid(
+            row=1, column=0, sticky="ew", padx=2
+        )
+        ttk.Button(file_frame, text="Remove Selected", command=self.remove_files).grid(
+            row=1, column=1, sticky="ew", padx=2
+        )
+        ttk.Button(file_frame, text="Clear All", command=self.clear_files).grid(
+            row=1, column=2, sticky="ew", padx=2
+        )
 
-        remove_button = tk.Button(file_frame, text="Remove Selected", command=self.remove_selected_files)
-        remove_button.grid(row=1, column=1, sticky="ew", padx=2, pady=2)
-
-        # Console Output Frame (on Pipeline Tab)
-        console_frame = tk.LabelFrame(self.pipeline_tab, text="Console Output", padx=10, pady=10)
+        # Console frame
+        console_frame = ttk.LabelFrame(pipeline_tab, text="Console Output", padding=10)
         console_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
         console_frame.grid_rowconfigure(0, weight=1)
         console_frame.grid_columnconfigure(0, weight=1)
 
-        self.console_text = scrolledtext.ScrolledText(console_frame, wrap=tk.WORD, height=15, state='disabled')
+        self.console_text = scrolledtext.ScrolledText(
+            console_frame, wrap=tk.WORD, height=15, state='disabled',
+            font=('Consolas', 9)
+        )
         self.console_text.grid(row=0, column=0, sticky="nsew")
 
-        # Pipeline Controls Frame (on Pipeline Tab, only Start/Quit)
-        pipeline_controls_frame = tk.Frame(self.pipeline_tab, padx=5, pady=5)
-        pipeline_controls_frame.grid(row=2, column=0, sticky="ew")
-        pipeline_controls_frame.grid_columnconfigure(0, weight=1)
-        pipeline_controls_frame.grid_columnconfigure(1, weight=1)
-        pipeline_controls_frame.grid_columnconfigure(2, weight=1)
+        # Control buttons
+        control_frame = ttk.Frame(pipeline_tab, padding=5)
+        control_frame.grid(row=2, column=0, sticky="ew")
+        control_frame.grid_columnconfigure(0, weight=1)
+        control_frame.grid_columnconfigure(1, weight=1)
+        control_frame.grid_columnconfigure(2, weight=1)
 
-        self.start_pipeline_button = tk.Button(pipeline_controls_frame, text="Start Pipeline (Process Files)", command=self.start_pipeline)
-        self.start_pipeline_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
-
-        self.clear_console_button = tk.Button(pipeline_controls_frame, text="Clear Console", command=self.clear_console)
-        self.clear_console_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-
-        self.quit_button = tk.Button(pipeline_controls_frame, text="Quit", command=self.quit_application)
-        self.quit_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
-
-
-        # --- 2. Settings Tab (Configuration View) ---
-        self.settings_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.settings_tab, text="Settings")
-        self.settings_tab.grid_rowconfigure(0, weight=1)
-        self.settings_tab.grid_columnconfigure(0, weight=1)
-
-        # Scrollable Area for Settings
-        canvas = tk.Canvas(self.settings_tab)
-        canvas.grid(row=0, column=0, sticky="nsew")
-
-        scrollbar = ttk.Scrollbar(self.settings_tab, orient="vertical", command=canvas.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        self.settings_content_frame = ttk.Frame(canvas)
-        canvas.create_window((0, 0), window=self.settings_content_frame, anchor="nw")
-
-        self.settings_content_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        self.start_button = ttk.Button(
+            control_frame, text="Start Pipeline", command=self.start_pipeline
         )
-        self.settings_content_frame.grid_columnconfigure(0, weight=0) # Labels
-        self.settings_content_frame.grid_columnconfigure(1, weight=1) # Inputs
+        self.start_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
-        # General Controls Frame (Manual Tags, Slider, Recalculate)
-        general_controls_frame = tk.LabelFrame(self.settings_content_frame, text="Runtime Controls & Linking", padx=10, pady=10)
-        general_controls_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
-        general_controls_frame.grid_columnconfigure(1, weight=1)
-        general_controls_frame_row = 0
+        ttk.Button(
+            control_frame, text="Clear Console", command=self.clear_console
+        ).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-        # Semantic Similarity Slider
-        self.threshold_label = tk.Label(general_controls_frame, text=f"Similarity Threshold: {config.SIMILARITY_THRESHOLD:.2f}")
-        self.threshold_label.grid(row=general_controls_frame_row, column=0, columnspan=2, pady=(0, 5), sticky="w")
-        general_controls_frame_row += 1
+        ttk.Button(
+            control_frame, text="Quit", command=self.quit_app
+        ).grid(row=0, column=2, padx=5, pady=5, sticky="ew")
 
-        self.threshold_slider = tk.Scale(general_controls_frame, from_=0.0, to=1.0, resolution=0.01,
-                                         orient=tk.HORIZONTAL, length=300,
-                                         command=self.update_threshold_label)
-        self.threshold_slider.set(config.SIMILARITY_THRESHOLD) # Set initial value
-        self.threshold_slider.grid(row=general_controls_frame_row, column=0, columnspan=2, padx=5, sticky="ew")
-        general_controls_frame_row += 1
+        # === SETTINGS TAB ===
+        settings_tab = ttk.Frame(self.notebook)
+        self.notebook.add(settings_tab, text="Settings")
+        settings_tab.grid_columnconfigure(1, weight=1)
 
-        # Manual Tags Input
-        tk.Label(general_controls_frame, text="Manual Tags (comma separated):").grid(row=general_controls_frame_row, column=0, sticky="w", pady=(10, 2))
-        self.manual_tags_entry = tk.Entry(general_controls_frame)
-        self.manual_tags_entry.grid(row=general_controls_frame_row, column=1, sticky="ew", padx=5, pady=(10, 2))
-        general_controls_frame_row += 1
-        
-        # Recalculate Button
-        self.recalculate_links_button = tk.Button(general_controls_frame, text="Recalculate ALL Links (Applies Current Threshold)", command=self.recalculate_links)
-        self.recalculate_links_button.grid(row=general_controls_frame_row, column=0, columnspan=2, padx=5, pady=10, sticky="ew")
+        row = 0
 
+        # Manual tags
+        ttk.Label(settings_tab, text="Manual Tags:").grid(
+            row=row, column=0, sticky="w", padx=10, pady=5
+        )
+        self.tags_entry = ttk.Entry(settings_tab)
+        self.tags_entry.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
+        row += 1
 
-        # Dynamic Configuration Editor
-        self.create_config_editor(self.settings_content_frame)
+        # Similarity threshold
+        ttk.Label(settings_tab, text="Similarity Threshold:").grid(
+            row=row, column=0, sticky="w", padx=10, pady=5
+        )
 
-        # Save Button (outside the dynamic editor)
-        save_button = tk.Button(self.settings_content_frame, text="Save Settings to config.py", command=self.save_config)
-        save_button.grid(row=self.settings_content_row, column=0, columnspan=2, pady=20)
+        threshold_frame = ttk.Frame(settings_tab)
+        threshold_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
 
+        self.threshold_var = tk.DoubleVar(value=config.SIMILARITY_THRESHOLD)
+        self.threshold_label = ttk.Label(
+            threshold_frame, text=f"{config.SIMILARITY_THRESHOLD:.2f}"
+        )
+        self.threshold_label.pack(side=tk.LEFT, padx=(0, 10))
 
-    def create_config_editor(self, parent_frame):
-        """Dynamically creates input fields for all configurable items."""
-        
-        config_editor_frame = tk.LabelFrame(parent_frame, text="LLM and System Configuration (config.py)", padx=10, pady=10)
-        config_editor_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
-        config_editor_frame.grid_columnconfigure(1, weight=1)
+        self.threshold_slider = ttk.Scale(
+            threshold_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL,
+            variable=self.threshold_var, command=self.update_threshold_label
+        )
+        self.threshold_slider.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        row += 1
 
-        self.settings_content_row = 0
+        # Recalculate links button
+        self.relink_button = ttk.Button(
+            settings_tab, text="Recalculate All Links",
+            command=self.recalculate_links
+        )
+        self.relink_button.grid(row=row, column=0, columnspan=2, padx=10, pady=20)
+        row += 1
 
-        for name, data_type, description in CONFIGURABLE_ITEMS:
-            current_row = self.settings_content_row
+        # Info section
+        ttk.Separator(settings_tab, orient='horizontal').grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=10, pady=10
+        )
+        row += 1
 
-            # Determine the module and variable name
-            if "(" in name and name.endswith(")"): # Hardcoded/Runtime variable from other files
-                # Example name: "max_chars_per_chunk (segment.py)"
-                
-                # Split the full name into "variable_name" and "(module.py)"
-                parts = name.split("(")
-                var_name = parts[0].strip() # "max_chars_per_chunk"
-                module_part = parts[1].strip() # "segment.py)"
+        info_text = f"""Configuration:
+Vault: {config.OBSIDIAN_VAULT_ROOT}
+LLM: {config.LOCAL_LLM_BASE_URL}
+Model: {config.LOCAL_LLM_MODEL}
+Whisper: {config.LOCAL_WHISPER_MODEL_SIZE}
+Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
 
-                # Extract module name from "(module.py)"
-                module_name = module_part.replace(").py", "").replace(")", "").replace(".py", "") # Cleans up segment.py or classify.py
-                
-                # Use the extracted variable name (var_name) for logic
-                if var_name == "max_chars_per_chunk":
-                    # This is hardcoded in segment.py (line ~77)
-                    initial_value = 10000 
-                elif var_name == "max_output_tokens":
-                    # This is hardcoded in classify.py (line ~43)
-                    initial_value = 50 
-                else:
-                    initial_value = "N/A"
-                source = f"({module_name}.py)"
-            else: # Variable from config.py
-                try:
-                    initial_value = getattr(config, name)
-                except AttributeError:
-                    initial_value = "NOT FOUND"
-                source = "(config.py)"
+        info_label = ttk.Label(
+            settings_tab, text=info_text, justify=tk.LEFT,
+            font=('Consolas', 9), foreground='gray'
+        )
+        info_label.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
-            # Label for variable name and description
-            label_text = f"{name} {source}:\n{description}"
-            tk.Label(config_editor_frame, text=label_text, anchor="w", justify=tk.LEFT,
-                     wraplength=400).grid(row=current_row, column=0, sticky="w", padx=5, pady=(5, 0))
+    def redirect_stdout(self):
+        """Redirect stdout and stderr to console."""
+        self.console_text.configure(state='normal')
+        sys.stdout = TextRedirector(self.console_text)
+        sys.stderr = TextRedirector(self.console_text)
+        print("Zettelpal ready.")
 
-            # Input Widget
-            if data_type == "multiline":
-                var = tk.StringVar(value=initial_value if initial_value else "") # Text widgets use insert/get, not StringVar
-                text_widget = scrolledtext.ScrolledText(config_editor_frame, height=8, width=50, wrap=tk.WORD)
-                text_widget.insert(tk.END, initial_value)
-                text_widget.grid(row=current_row, column=1, sticky="ew", padx=5, pady=5)
-                self.config_vars[name] = (data_type, text_widget)
-
-            else: # Simple Entry fields
-                # Use StringVar to hold the value and enable easy reading
-                var = tk.StringVar(value=str(initial_value))
-                entry = tk.Entry(config_editor_frame, textvariable=var)
-                entry.grid(row=current_row, column=1, sticky="ew", padx=5, pady=5)
-                self.config_vars[name] = (data_type, var)
-
-            self.settings_content_row += 1
-
-
-    def save_config(self):
-        """Reads all configuration fields and attempts to save back to config.py."""
-        updates = {}
-        
-        # 1. Gather all values and validate
-        for name, (data_type, widget_or_var) in self.config_vars.items():
-            try:
-                if data_type == "multiline":
-                    value = widget_or_var.get("1.0", tk.END).strip()
-                else:
-                    value = widget_or_var.get().strip()
-
-                if "(" in name and name.endswith(")"):
-                     # Skip writing hardcoded runtime variables to config.py, but validate type
-                     if data_type == "int": int(value)
-                     elif data_type == "float": float(value)
-                     continue 
-                     
-                # Validate and format for writing to config.py
-                if data_type == "int":
-                    updates[name] = int(value)
-                elif data_type == "float":
-                    updates[name] = float(value)
-                elif data_type == "path":
-                    # Paths are just strings, but ensure they aren't empty
-                    if not value: raise ValueError("Path cannot be empty.")
-                    updates[name] = value
-                else: # 'str' type
-                    updates[name] = value
-
-            except ValueError as e:
-                messagebox.showerror("Validation Error", f"Invalid value for {name} ({data_type}): {e}")
-                return # Stop save process
-
-        # 2. Rewrite config.py
-        config_path = os.path.join(os.path.dirname(__file__), "config.py")
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            
-            new_lines = []
-            
-            # Simple line-by-line substitution is used for simplicity.
-            for line in lines:
-                updated = False
-                for name, value in updates.items():
-                    if line.strip().startswith(f"{name} ="):
-                        if isinstance(value, str) and not name.endswith("TEMPLATE"):
-                            # Wrap strings (including paths) in quotes
-                            new_lines.append(f'{name} = "{value}"\n')
-                        elif isinstance(value, str) and name.endswith("TEMPLATE"):
-                            # Multiline prompts are already structured correctly; write as is
-                            new_lines.append(line) 
-                        else:
-                            # Write numbers directly
-                            new_lines.append(f'{name} = {value}\n')
-                        updated = True
-                        break
-                
-                if not updated:
-                    new_lines.append(line)
-
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.writelines(new_lines)
-            
-            messagebox.showinfo("Success", "Configuration saved successfully. Restart the application for changes to fully take effect!")
-            
-            # Optionally, update runtime values (e.g., SIMILARITY_THRESHOLD) without restart
-            if "SIMILARITY_THRESHOLD" in updates:
-                new_threshold = updates["SIMILARITY_THRESHOLD"]
-                config.SIMILARITY_THRESHOLD = new_threshold # Update module variable
-                self.threshold_slider.set(new_threshold) # Update GUI slider
-                self.update_threshold_label(new_threshold)
-
-        except Exception as e:
-            messagebox.showerror("File Error", f"Failed to save config.py: {e}")
-            import traceback
-            traceback.print_exc()
-
-
-    # --- Methods moved from Controls Frame ---
+    def update_threshold_label(self, val=None):
+        """Update the threshold display."""
+        self.threshold_label.config(text=f"{self.threshold_var.get():.2f}")
 
     def add_files(self):
-        # ... (Same as original implementation)
-        filetypes = [("Audio files", "*.mp3 *.wav *.flac *.m4a"), ("All files", "*.*")]
-        new_files_selected = filedialog.askopenfilenames(
-            title="Select Audio Files for Zettelpal",
+        """Add audio files to the queue."""
+        filetypes = [
+            ("Audio files", "*.mp3 *.wav *.flac *.m4a *.ogg *.wma"),
+            ("All files", "*.*")
+        ]
+        files = filedialog.askopenfilenames(
+            title="Select Audio Files",
             filetypes=filetypes
         )
-        if new_files_selected:
-            processed_count = 0
-            for original_filepath in new_files_selected:
-                filename = os.path.basename(original_filepath)
 
-                # Check if the file already has the correct naming schema
-                if not utils.is_valid_zettelpal_filename(filename):
-                    print(f"File '{filename}' does not match MMDDYYNN.ext format. Attempting to rename...")
-                    renamed_filepath = utils.rename_audio_file_to_zettelpal_format(original_filepath)
-                    if renamed_filepath:
-                        filepath_to_add = renamed_filepath
-                        print(f"Successfully renamed to '{os.path.basename(renamed_filepath)}'.")
-                    else:
-                        print(f"Failed to rename '{filename}'. This file will be skipped.")
-                        messagebox.showwarning("Renaming Failed", f"Could not rename '{filename}'. It will be skipped. Please check console for details.")
-                        continue # Skip this file if renaming failed
+        for filepath in files:
+            filename = os.path.basename(filepath)
+
+            # Check/rename to Zettelpal format
+            if not utils.is_valid_zettelpal_filename(filename):
+                print(f"Renaming {filename} to Zettelpal format...")
+                renamed = utils.rename_audio_file_to_zettelpal_format(filepath)
+                if renamed:
+                    filepath = renamed
                 else:
-                    filepath_to_add = original_filepath
-                    print(f"File '{filename}' already matches MMDDYYNN.ext format. No renaming needed.")
+                    print(f"Failed to rename {filename}. Skipping.")
+                    continue
 
-                # Add to listbox and internal list only if it's not already there and wasn't skipped
-                if filepath_to_add not in self.audio_files:
-                    self.audio_files.append(filepath_to_add)
-                    self.file_listbox.insert(tk.END, os.path.basename(filepath_to_add))
-                    processed_count += 1
-                else:
-                    print(f"File '{os.path.basename(filepath_to_add)}' already in queue.")
+            if filepath not in self.audio_files:
+                self.audio_files.append(filepath)
+                self.file_listbox.insert(tk.END, os.path.basename(filepath))
 
-            if processed_count > 0:
-                print(f"Added {processed_count} new files to the queue.")
-            else:
-                print("No new files added (all either skipped or already in queue).")
+        if files:
+            print(f"Added {len(files)} file(s) to queue.")
 
-    def remove_selected_files(self):
-        # ... (Same as original implementation)
-        selected_indices = self.file_listbox.curselection()
-        if not selected_indices:
-            messagebox.showinfo("No Selection", "Please select files to remove.")
-            return
-
-        # Delete from listbox in reverse order to avoid index issues
-        for i in selected_indices[::-1]:
+    def remove_files(self):
+        """Remove selected files from queue."""
+        selected = self.file_listbox.curselection()
+        for i in reversed(selected):
             self.file_listbox.delete(i)
-            del self.audio_files[i] # Remove from our internal list too
-        print("Removed selected files.")
+            del self.audio_files[i]
+
+    def clear_files(self):
+        """Clear all files from queue."""
+        self.file_listbox.delete(0, tk.END)
+        self.audio_files.clear()
 
     def clear_console(self):
-        # ... (Same as original implementation)
+        """Clear the console output."""
         self.console_text.configure(state='normal')
         self.console_text.delete(1.0, tk.END)
         self.console_text.configure(state='disabled')
-        print("Console cleared.")
 
-    def redirect_stdout_to_console(self):
-        # ... (Same as original implementation)
-        self.console_text.configure(state='normal') # Enable writing
-        sys.stdout = TextRedirector(self.console_text)
-        sys.stderr = TextRedirector(self.console_text) # Also redirect stderr
-        print("Console output redirected.")
-
-    def update_threshold_label(self, val):
-        self.threshold_label.config(text=f"Similarity Threshold: {float(val):.2f}")
-
-    def disable_buttons(self):
-        # Disable all major action buttons and input fields
-        self.start_pipeline_button.config(state=tk.DISABLED)
-        self.recalculate_links_button.config(state=tk.DISABLED)
-        self.threshold_slider.config(state=tk.DISABLED)
-        self.manual_tags_entry.config(state=tk.DISABLED)
-
-    def enable_buttons(self):
-        # Enable all major action buttons and input fields
-        self.start_pipeline_button.config(state=tk.NORMAL)
-        self.recalculate_links_button.config(state=tk.NORMAL)
-        self.threshold_slider.config(state=tk.NORMAL)
-        self.manual_tags_entry.config(state=tk.NORMAL)
+    def set_buttons_state(self, enabled: bool):
+        """Enable or disable action buttons."""
+        state = tk.NORMAL if enabled else tk.DISABLED
+        self.start_button.config(state=state)
+        self.relink_button.config(state=state)
 
     def start_pipeline(self):
-        # ... (Same as original implementation, using updated flow)
+        """Start processing the audio queue."""
         if not self.audio_files:
             messagebox.showinfo("No Files", "Please add audio files to process.")
             return
 
-        # Get manual tags from the Settings Tab widget
-        manual_tags_input = self.manual_tags_entry.get().strip()
-        
-        # Put all selected files and the tags into the processing queue
+        manual_tags = self.tags_entry.get().strip()
+
         for filepath in self.audio_files:
-            self.processing_queue.put((filepath, manual_tags_input))
+            self.processing_queue.put((filepath, manual_tags))
 
-        # Clear the listbox and internal list
         self.file_listbox.delete(0, tk.END)
-        self.audio_files = []
-        
-        # Clear the manual tags input box after reading it
-        self.manual_tags_entry.delete(0, tk.END)
+        self.audio_files.clear()
+        self.tags_entry.delete(0, tk.END)
 
-        self.disable_buttons()
-        print("\n--- Starting Zettelpal Pipeline ---")
-        self.processing_thread = threading.Thread(target=self._process_files_in_queue)
+        self.set_buttons_state(False)
+        print("\n" + "=" * 50)
+        print("STARTING PIPELINE")
+        print("=" * 50)
+
+        self.processing_thread = threading.Thread(target=self._process_queue)
         self.processing_thread.start()
 
-    def _process_files_in_queue(self):
-        # ... (Same as original implementation)
+    def _process_queue(self):
+        """Process files in the queue (runs in thread)."""
         while not self.processing_queue.empty():
-            current_audio_filepath, manual_tags = self.processing_queue.get() 
-            print(f"\nProcessing file: {os.path.basename(current_audio_filepath)}")
-            print(f"  Manual tags applied: '{manual_tags}'")
+            filepath, tags = self.processing_queue.get()
+            print(f"\nProcessing: {os.path.basename(filepath)}")
+            if tags:
+                print(f"Tags: {tags}")
+
             try:
-                pipeline_success = self._run_single_pipeline_for_gui(current_audio_filepath, manual_tags)
-                if not pipeline_success:
-                     print(f"Pipeline failed for {os.path.basename(current_audio_filepath)}. Skipping.")
+                self._run_pipeline(filepath, tags)
             except Exception as e:
-                print(f"Error processing {os.path.basename(current_audio_filepath)}: {e}")
+                print(f"ERROR: {e}")
                 import traceback
                 traceback.print_exc()
-                messagebox.showerror("Processing Error", f"Error processing {os.path.basename(current_audio_filepath)}. See console for details.")
 
-        print("\n--- All files processed. ---")
-        self.after(0, self.enable_buttons)
+        print("\n" + "=" * 50)
+        print("ALL FILES PROCESSED")
+        print("=" * 50)
+        self.after(0, lambda: self.set_buttons_state(True))
 
-
-    def _run_single_pipeline_for_gui(self, audio_filepath: str, manual_tags_str: str) -> bool:
-        # ... (Same as original implementation)
-        print(f"--- Zettelpal Pipeline Started for {os.path.basename(audio_filepath)} ---")
-
+    def _run_pipeline(self, audio_filepath: str, manual_tags: str) -> bool:
+        """Run the full pipeline for one audio file."""
         audio_basename = os.path.basename(audio_filepath)
-        audio_filename_stem = os.path.splitext(audio_basename)[0]
-        audio_extension = os.path.splitext(audio_basename)[1].lstrip('.')
+        audio_stem = os.path.splitext(audio_basename)[0]
+        audio_ext = os.path.splitext(audio_basename)[1].lstrip('.')
 
-        if not re.match(r"^\d{6,8}$", audio_filename_stem):
-            print(f"ERROR: Audio filename stem '{audio_filename_stem}' does not match expected MMDDYY(NN) format (6 to 8 digits).")
-            print("Please ensure files are renamed correctly before adding.")
+        if not re.match(r"^\d{6,8}$", audio_stem):
+            print(f"ERROR: Invalid filename format: {audio_stem}")
             return False
 
-        recording_id = audio_filename_stem
-        timestamp_full = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        raw_transcript_filepath_intermediate = os.path.join(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, f"{recording_id}.txt")
-        segmented_filepath_intermediate = os.path.join(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, f"{recording_id}_segmented.json")
-        archived_audio_filepath = os.path.join(config.ARCHIVE_DIR, f"{recording_id}_{timestamp_full}.{audio_extension}")
-        archived_raw_transcript_filepath = os.path.join(config.ARCHIVE_DIR, f"{recording_id}_{timestamp_full}.txt")
+        recording_id = audio_stem
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
-        print(f"Processing Recording ID: {recording_id}")
+        raw_path = os.path.join(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, f"{recording_id}.txt")
+        seg_path = os.path.join(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, f"{recording_id}_segmented.json")
+        arch_audio = os.path.join(config.ARCHIVE_DIR, f"{recording_id}_{timestamp}.{audio_ext}")
+        arch_transcript = os.path.join(config.ARCHIVE_DIR, f"{recording_id}_{timestamp}.txt")
 
-        # --- Step 1: Transcribe ---
-        print("\n--- Step 1: Transcribing Audio ---")
-        transcription_output_path = transcribe.transcribe_audio_to_file(audio_filepath, raw_transcript_filepath_intermediate)
-        if transcription_output_path is None or not os.path.exists(transcription_output_path):
-            print("ERROR: Transcription step failed. Skipping pipeline for this file.")
+        # Step 1: Transcribe
+        print("\n--- Step 1: Transcribe ---")
+        result = transcribe.transcribe_audio_to_file(audio_filepath, raw_path)
+        if result is None:
+            print("ERROR: Transcription failed.")
             return False
 
-        print("Step 1 Complete.")
-
-        # --- Step 2: Classify ---
-        print("\n--- Step 2: Classifying Transcript ---")
+        # Step 2: Classify
+        print("\n--- Step 2: Classify ---")
         try:
-            with open(transcription_output_path, "r", encoding="utf-8") as f:
-                raw_transcript_content = f.read()
+            with open(raw_path, "r", encoding="utf-8") as f:
+                raw_transcript = f.read()
         except Exception as e:
-            print(f"ERROR: Could not re-read raw transcript file for classification: {e}")
-            print("Skipping pipeline for this file.")
-            return False
-        
-        transcript_type_tag = classify.classify_transcript(raw_transcript_content)
-        
-        if transcript_type_tag is None:
-            print("ERROR: Transcript could not be classified. **Every note needs a type tag.** Skipping pipeline for this file.")
-            if os.path.exists(transcription_output_path):
-                try:
-                    os.remove(transcription_output_path)
-                    print(f"  Cleaned up intermediate raw transcript: {transcription_output_path}")
-                except Exception as e:
-                    print(f"Warning: Could not clean up intermediate raw transcript {transcription_output_path}: {e}")
-            return False
-            
-        print(f"Transcript classified as: {transcript_type_tag}")
-        print("Step 2 Complete.")
-
-        # --- Step 3: Segment ---
-        print("\n--- Step 3: Segmenting Transcript ---")
-        if config.GOOGLE_API_KEY is None:
-             print("ERROR: GOOGLE_API_KEY environment variable is not set. Cannot perform segmentation.")
-             if os.path.exists(transcription_output_path):
-                 try:
-                     os.remove(transcription_output_path)
-                     print(f"  Cleaned up intermediate raw transcript: {transcription_output_path}")
-                 except Exception as e:
-                     print(f"Warning: Could not clean up intermediate raw transcript {transcription_output_path}: {e}")
-             return False
-
-        segmented_data = segment.segment_and_title_transcript_gemini(raw_transcript_content)
-
-        if not segmented_data:
-            print("ERROR: Segmentation step failed or produced no segments. Skipping pipeline for this file.")
-            if os.path.exists(transcription_output_path):
-                try:
-                    os.remove(transcription_output_path)
-                    print(f"  Cleaned up intermediate raw transcript: {transcription_output_path}")
-                except Exception as e:
-                    print(f"Warning: Could not clean up intermediate raw transcript {transcription_output_path}: {e}")
-
+            print(f"ERROR: Could not read transcript: {e}")
             return False
 
+        transcript_type = classify.classify_transcript(raw_transcript)
+        if transcript_type is None:
+            print("ERROR: Classification failed.")
+            self._cleanup(raw_path)
+            return False
+        print(f"Type: {transcript_type}")
+
+        # Step 3: Segment
+        print("\n--- Step 3: Segment ---")
+        segments = segment.segment_transcript(raw_transcript)
+        if not segments:
+            print("ERROR: Segmentation failed.")
+            self._cleanup(raw_path)
+            return False
+
+        # Save segments
         try:
-            os.makedirs(os.path.dirname(segmented_filepath_intermediate), exist_ok=True)
-            with open(segmented_filepath_intermediate, "w", encoding="utf-8") as f:
-                json.dump(segmented_data, f, indent=4)
-            print(f"Segmented data saved to {segmented_filepath_intermediate}")
-        except Exception as e:
-            print(f"Warning: Could not save segmented data to intermediate file {segmented_filepath_intermediate}: {e}")
+            with open(seg_path, "w", encoding="utf-8") as f:
+                json.dump(segments, f, indent=2)
+        except:
+            pass
 
-        print("Step 3 Complete.")
-
-        # --- Step 4: Create Obsidian Notes & Embed ---
-        print("\n--- Step 4: Creating Obsidian Notes ---")
-        notes_info_for_linking = create_notes.create_notes_from_segments(
-            segmented_data,
+        # Step 4: Create Notes
+        print("\n--- Step 4: Create Notes ---")
+        notes_info = create_notes.create_notes_from_segments(
+            segments,
             os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
             config.NOTES_SUBDIRECTORY_IN_VAULT,
             recording_id,
-            transcript_type_tag,
-            manual_tags_str
+            transcript_type,
+            manual_tags
         )
+        print(f"Created {len(notes_info)} notes.")
 
-        if not notes_info_for_linking:
-            print("Warning: Note creation completed, but no notes were successfully created with valid embeddings. Linking step will be skipped for these new notes.")
-            print("Step 4 Complete (No new notes with embeddings).")
-        else:
-             print(f"Step 4 Complete. {len(notes_info_for_linking)} notes created and initial embeddings calculated.")
+        # Step 5: Link
+        print("\n--- Step 5: Link Notes ---")
+        threshold = self.threshold_var.get()
+        link_notes.run_linking_process(threshold, notes_info)
 
-
-        # --- Step 5: Perform Semantic Linking (for ALL notes in vault) ---
-        print("\n--- Step 5: Performing Semantic Linking for ALL notes ---")
-        # Get threshold directly from slider/updated config
-        current_threshold = self.threshold_slider.get() 
-
-        link_success = link_notes.run_linking_process(current_threshold)
-
-        if not link_success:
-            print("Warning: Semantic linking encountered an issue. Please check console output.")
-
-        print("Step 5 Complete: Semantic linking finished.")
-
-        # --- Step 6 & 7: Archiving and Cleanup ---
-        print("\n--- Step 6 & 7: Archiving and Cleanup ---")
-
-        print("Archiving original audio file...")
+        # Step 6: Archive
+        print("\n--- Step 6: Archive ---")
         try:
-            shutil.move(audio_filepath, archived_audio_filepath)
-            print(f"  Archived audio file to: {archived_audio_filepath}")
-        except FileNotFoundError:
-             print(f"Warning: Original audio file not found at {audio_filepath} for archiving.")
+            shutil.move(audio_filepath, arch_audio)
+            print(f"Archived: {os.path.basename(arch_audio)}")
         except Exception as e:
-            print(f"Warning: Failed to archive original audio file from {audio_filepath}: {e}")
+            print(f"Warning: {e}")
 
-        print("Archiving raw transcript text file...")
-        if transcription_output_path and os.path.exists(transcription_output_path):
-            try:
-                shutil.move(transcription_output_path, archived_raw_transcript_filepath)
-                print(f"  Archived raw transcript to: {archived_raw_transcript_filepath}")
-            except FileNotFoundError:
-                 print(f"Warning: Intermediate raw transcript file not found at {transcription_output_path} for archiving.")
-            except Exception as e:
-                 print(f"Warning: Failed to archive raw transcript from {transcription_output_path}: {e}")
-        else:
-            print(f"Warning: No intermediate raw transcript file found at {transcription_output_path} to archive.")
-
-        print("Cleaning up intermediate segmented JSON file...")
         try:
-            if os.path.exists(segmented_filepath_intermediate):
-                 os.remove(segmented_filepath_intermediate)
-                 print(f"  Cleaned up {segmented_filepath_intermediate}")
-            else:
-                print(f"  Intermediate segmented file not found: {segmented_filepath_intermediate} (already gone?)")
+            shutil.move(raw_path, arch_transcript)
+            print(f"Archived: {os.path.basename(arch_transcript)}")
         except Exception as e:
-            print(f"Warning: Failed to clean up segmented intermediate file {segmented_filepath_intermediate}: {e}")
+            print(f"Warning: {e}")
 
-        print(f"\n--- Zettelpal Pipeline Finished for {os.path.basename(audio_filepath)} ---")
+        self._cleanup(seg_path)
+
+        print(f"\nCompleted: {recording_id}")
         return True
 
+    def _cleanup(self, filepath: str):
+        """Remove a temporary file."""
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except:
+            pass
 
     def recalculate_links(self):
-        # ... (Same as original implementation)
+        """Recalculate all semantic links."""
         if self.processing_thread and self.processing_thread.is_alive():
-             messagebox.showinfo("Process Running", "A file processing pipeline is currently running. Please wait for it to finish before recalculating links.")
-             return
+            messagebox.showinfo("Busy", "Please wait for current processing to finish.")
+            return
 
-        self.disable_buttons()
-        current_threshold = self.threshold_slider.get()
-        print(f"\n--- Recalculating all links with threshold: {current_threshold:.2f} ---")
-        self.processing_thread = threading.Thread(target=self._run_linking_in_thread, args=(current_threshold,))
+        self.set_buttons_state(False)
+        threshold = self.threshold_var.get()
+        print(f"\nRecalculating all links (threshold: {threshold:.2f})...")
+
+        self.processing_thread = threading.Thread(
+            target=self._relink_thread, args=(threshold,)
+        )
         self.processing_thread.start()
 
-    def _run_linking_in_thread(self, threshold):
-        # ... (Same as original implementation)
+    def _relink_thread(self, threshold: float):
+        """Run linking in a thread."""
         try:
-            link_success = link_notes.run_linking_process(threshold)
-            if link_success:
-                 print("\n--- Link Recalculation Completed ---")
+            success = link_notes.run_linking_process(threshold)
+            if success:
+                print("Link recalculation complete.")
             else:
-                 print("\n--- Link Recalculation Failed ---")
-                 self.after(0, lambda: messagebox.showerror("Linking Error", "An error occurred during link recalculation. See console for details."))
-
+                print("Link recalculation failed.")
         except Exception as e:
-            print(f"Error during link recalculation: {e}")
+            print(f"ERROR: {e}")
             import traceback
             traceback.print_exc()
-            self.after(0, lambda: messagebox.showerror("Linking Error", f"An error occurred during link recalculation: {e}. See console for details."))
         finally:
-            self.after(0, self.enable_buttons)
+            self.after(0, lambda: self.set_buttons_state(True))
 
-    def quit_application(self):
-        # ... (Same as original implementation)
+    def quit_app(self):
+        """Quit the application."""
         if self.processing_thread and self.processing_thread.is_alive():
-            if not messagebox.askyesno("Confirm Quit", "A process is running. Quitting now will terminate it. Are you sure?"):
+            if not messagebox.askyesno(
+                "Confirm Quit",
+                "Processing is running. Quit anyway?"
+            ):
                 return
         self.destroy()
 
