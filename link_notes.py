@@ -205,12 +205,21 @@ def update_all_notes_links(
         print("No notes with embeddings.")
         return
 
+    print(f"[LINK DEBUG] {len(notes_with_embeddings)} notes have embeddings")
+    print(f"[LINK DEBUG] Computing {len(notes_with_embeddings)}x{len(notes_with_embeddings)} similarity matrix...")
+
     all_embeddings = np.array([n["embedding"] for n in notes_with_embeddings])
     emb_filepath_to_idx = {n["filepath"]: i for i, n in enumerate(notes_with_embeddings)}
 
     sim_matrix = np.full((len(all_embeddings), len(all_embeddings)), -1.0)
     if len(all_embeddings) > 1:
         sim_matrix = cosine_similarity(all_embeddings)
+        # Show similarity distribution
+        upper_tri = sim_matrix[np.triu_indices(len(sim_matrix), k=1)]
+        if len(upper_tri) > 0:
+            print(f"[LINK DEBUG] Similarity stats: min={upper_tri.min():.3f}, max={upper_tri.max():.3f}, mean={upper_tri.mean():.3f}")
+            above_threshold = np.sum(upper_tri >= threshold)
+            print(f"[LINK DEBUG] {above_threshold} pairs above threshold {threshold:.2f}")
 
     # Process each note
     for note in notes_to_update:
@@ -302,6 +311,18 @@ def update_all_notes_links(
 
             # Sort by similarity
             semantic_links.sort(key=lambda x: x["similarity"], reverse=True)
+
+        # Debug output
+        note_name = os.path.basename(filepath)
+        if semantic_links:
+            print(f"[LINK] {note_name}: {len(semantic_links)} semantic links found")
+            # Show top 3 matches
+            for link_info in semantic_links[:3]:
+                print(f"       -> {link_info['display_title'][:40]:<40} (sim: {link_info['similarity']:.3f})")
+            if len(semantic_links) > 3:
+                print(f"       ... and {len(semantic_links) - 3} more")
+        else:
+            print(f"[LINK] {note_name}: no semantic links above threshold {threshold:.2f}")
 
         # Write semantic links
         if semantic_links:
