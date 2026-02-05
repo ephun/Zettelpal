@@ -43,8 +43,8 @@ LOCAL_LLM_MODEL = "gpt-oss:120b"
 
 # LLM parameters
 SEGMENTATION_LLM_TEMPERATURE = 0.3
-SEGMENTATION_MAX_TOKENS = 4096
-CLASSIFICATION_MAX_TOKENS = 20
+SEGMENTATION_MAX_TOKENS = 8192
+CLASSIFICATION_MAX_TOKENS = 100  # Needs extra tokens for model reasoning
 
 # =============================================================================
 # EMBEDDINGS & LINKING CONFIGURATION

@@ -107,7 +107,8 @@ def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, 
 
     for attempt in range(max_retries):
         try:
-            resp = requests.post(url, json=payload, timeout=120)
+            # Large local models (120B+) can take 10+ minutes per request
+            resp = requests.post(url, json=payload, timeout=900)
             if resp.status_code != 200:
                 print(f"[LLM ERROR] Status {resp.status_code}: {resp.text}")
                 time.sleep(2 ** (attempt + 1))

@@ -5,7 +5,7 @@ import config
 import utils
 
 
-def chunk_transcript(text: str, max_chars: int = 8000) -> list[str]:
+def chunk_transcript(text: str, max_chars: int = 4000) -> list[str]:
     """Splits large transcripts into chunks for LLM processing."""
     chunks = []
     start = 0
