@@ -16,38 +16,100 @@ def sanitize_filename(title: str) -> str:
     return s[:100] if s else "untitled"
 
 
+def generate_tags_for_content(content: str) -> list[str]:
+    """
+    Uses the local LLM to generate semantic tags for content.
+    Returns a list of tags or empty list on failure.
+    """
+    if not content or not content.strip():
+        return []
+
+    prompt = config.GRANULAR_TAGGING_PROMPT_TEMPLATE.format(text_content=content[:3000])
+
+    print("[TAGGING] Generating semantic tags...")
+    response = utils.local_llm_chat(prompt, temperature=0.3, max_tokens=200)
+
+    if not response:
+        print("[TAGGING] No response from LLM")
+        return []
+
+    # Try to parse as JSON list
+    parsed = utils.extract_json_from_text(response)
+    if parsed and isinstance(parsed, list):
+        # Filter to only valid string tags
+        tags = [t for t in parsed if isinstance(t, str) and t.strip()]
+        print(f"[TAGGING] Generated {len(tags)} tags")
+        return tags
+
+    print(f"[TAGGING] Could not parse tags from: {response[:100]}")
+    return []
+
+
+def get_placement(index: int, total: int) -> str:
+    """Determine placement string based on position in sequence."""
+    if total == 1:
+        return "only"
+    elif index == 0:
+        return "first"
+    elif index == total - 1:
+        return "last"
+    else:
+        return "middle"
+
+
 def format_yaml_frontmatter(
     title: str,
     emoji: str,
     recording_id: str,
     transcript_type_tag: str,
+    placement: str,
+    semantic_tags: list[str],
     manual_tags: str = ""
 ) -> str:
-    """Build YAML frontmatter for a note."""
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    """Build YAML frontmatter matching the original Zettelpal format."""
+    now = datetime.datetime.now()
+    note_id = now.strftime("%Y%m%d%H%M%S")
+    created_iso = now.isoformat()
 
     # Escape title for YAML
     safe_title = title.replace('"', '\\"')
 
     yaml_lines = [
         "---",
+        f"id: {note_id}",
         f'title: "{safe_title}"',
+        f"created: {created_iso}",
         f'emoji: "{emoji}"',
-        f"date: {date_str}",
-        f"type: {transcript_type_tag}",
-        f"recording: {recording_id}",
+        f'source: "{recording_id}"',
+        f'placement: "{placement}"',
+        "tags:",
     ]
 
-    # Add manual tags if provided
-    if manual_tags:
-        tags = [t.strip() for t in manual_tags.split(",") if t.strip()]
-        if tags:
-            yaml_lines.append("tags:")
-            for t in tags:
-                yaml_lines.append(f"  - {t}")
+    # Collect all tags
+    all_tags = []
 
-    # Placeholder for semantic linking
-    yaml_lines.append("semantic-tags: []")
+    # Add semantic tags from LLM
+    all_tags.extend(semantic_tags)
+
+    # Add manual tags
+    if manual_tags:
+        for t in manual_tags.split(","):
+            t = t.strip()
+            if t and t not in all_tags:
+                all_tags.append(t)
+
+    # Add the type tag
+    if transcript_type_tag and transcript_type_tag not in all_tags:
+        all_tags.append(transcript_type_tag)
+
+    # Always add zettelpal tag
+    if "zettelpal" not in all_tags:
+        all_tags.append("zettelpal")
+
+    # Write tags
+    for tag in all_tags:
+        yaml_lines.append(f"  - {tag}")
+
     yaml_lines.append("---")
     yaml_lines.append("")
 
@@ -73,6 +135,7 @@ def create_notes_from_segments(
     os.makedirs(output_dir, exist_ok=True)
 
     created_notes_info = []
+    total_segments = len(segmented_data)
 
     for i, seg in enumerate(segmented_data):
         title = seg.get("title", f"Segment {i + 1}")
@@ -95,11 +158,20 @@ def create_notes_from_segments(
             filepath = os.path.join(output_dir, filename)
             counter += 1
 
-        # Build note content
+        # Generate semantic tags for this content
+        semantic_tags = generate_tags_for_content(content)
+
+        # Determine placement
+        placement = get_placement(i, total_segments)
+
+        # Build frontmatter
         frontmatter = format_yaml_frontmatter(
-            title, emoji, recording_id, transcript_type_tag, manual_tags_str
+            title, emoji, recording_id, transcript_type_tag,
+            placement, semantic_tags, manual_tags_str
         )
-        full_note = f"{frontmatter}\n{content}\n"
+
+        # Build note with H1 heading
+        full_note = f"{frontmatter}# {title}\n\n{content}\n"
 
         # Write note to disk
         try:

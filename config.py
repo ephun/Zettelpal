@@ -59,7 +59,7 @@ EMBEDDINGS_CACHE_FILE = os.path.join(
 SIMILARITY_THRESHOLD = 0.6
 
 # Metadata key for source recording ID
-SOURCE_METADATA_KEY = "recording"
+SOURCE_METADATA_KEY = "source"
 
 # Link formatting
 LINK_SEPARATOR = ", "
