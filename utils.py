@@ -205,6 +205,18 @@ def extract_json_from_text(text: str):
     if text is None:
         return None
 
+    # Strip markdown code fences if present
+    text = text.strip()
+    if text.startswith("```"):
+        # Remove opening fence (```json or ```)
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1:]
+        # Remove closing fence
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+
     # Try exact JSON first
     try:
         return json.loads(text)
