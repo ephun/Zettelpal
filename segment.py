@@ -45,7 +45,7 @@ def segment_transcript(transcript: str) -> list[dict] | None:
 
         prompt = config.SEGMENTATION_PROMPT_TEMPLATE.format(transcript_chunk=chunk)
 
-        llm_response = utils.local_llm_chat(
+        llm_response = utils.llm_chat(
             prompt,
             temperature=config.SEGMENTATION_LLM_TEMPERATURE,
             max_tokens=config.SEGMENTATION_MAX_TOKENS

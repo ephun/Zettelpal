@@ -27,7 +27,7 @@ def generate_tags_for_content(content: str) -> list[str]:
     prompt = config.GRANULAR_TAGGING_PROMPT_TEMPLATE.format(text_content=content[:3000])
 
     print("[TAGGING] Generating semantic tags...")
-    response = utils.local_llm_chat(prompt, temperature=0.3, max_tokens=200)
+    response = utils.llm_chat(prompt, temperature=0.3, max_tokens=200)
 
     if not response:
         print("[TAGGING] No response from LLM")

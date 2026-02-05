@@ -15,7 +15,7 @@ def classify_transcript(transcript_text: str) -> str | None:
         type/journal
         type/thought
 
-    Uses the local LLM via utils.local_llm_chat().
+    Uses the local LLM via utils.llm_chat().
     Long transcripts are truncated to avoid overwhelming the model.
 
     Returns the classification tag or None on failure.
@@ -37,7 +37,7 @@ def classify_transcript(transcript_text: str) -> str | None:
     print(f"\n[CLASSIFY] Sending transcript to local LLM ({len(truncated)} chars)...")
 
     # Call LLM
-    response_text = utils.local_llm_chat(
+    response_text = utils.llm_chat(
         prompt,
         temperature=0.2,
         max_tokens=config.CLASSIFICATION_MAX_TOKENS

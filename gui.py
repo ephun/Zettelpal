@@ -99,8 +99,13 @@ class ZettelpalGUI(tk.Tk):
             os.makedirs(cache_dir, exist_ok=True)
 
             print("All directories ready.")
-            print(f"LLM: {config.LOCAL_LLM_BASE_URL}")
-            print(f"Model: {config.LOCAL_LLM_MODEL}")
+            backend = getattr(config, 'LLM_BACKEND', 'local')
+            print(f"LLM Backend: {backend}")
+            if backend == "gemini":
+                print(f"Gemini Model: {config.GEMINI_MODEL}")
+            else:
+                print(f"Local LLM: {config.LOCAL_LLM_BASE_URL}")
+                print(f"Model: {config.LOCAL_LLM_MODEL}")
             return True
 
         except Exception as e:
@@ -177,6 +182,26 @@ class ZettelpalGUI(tk.Tk):
 
         row = 0
 
+        # LLM Backend selection
+        ttk.Label(settings_tab, text="LLM Backend:").grid(
+            row=row, column=0, sticky="w", padx=10, pady=5
+        )
+        backend_frame = ttk.Frame(settings_tab)
+        backend_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
+
+        self.backend_var = tk.StringVar(value=getattr(config, 'LLM_BACKEND', 'local'))
+        self.backend_combo = ttk.Combobox(
+            backend_frame, textvariable=self.backend_var,
+            values=["local", "gemini"], state="readonly", width=15
+        )
+        self.backend_combo.pack(side=tk.LEFT)
+        self.backend_combo.bind("<<ComboboxSelected>>", self.on_backend_change)
+
+        self.backend_status = ttk.Label(backend_frame, text="", foreground="gray")
+        self.backend_status.pack(side=tk.LEFT, padx=(10, 0))
+        self.update_backend_status()
+        row += 1
+
         # Manual tags
         ttk.Label(settings_tab, text="Manual Tags:").grid(
             row=row, column=0, sticky="w", padx=10, pady=5
@@ -222,8 +247,8 @@ class ZettelpalGUI(tk.Tk):
 
         info_text = f"""Configuration:
 Vault: {config.OBSIDIAN_VAULT_ROOT}
-LLM: {config.LOCAL_LLM_BASE_URL}
-Model: {config.LOCAL_LLM_MODEL}
+Local LLM: {config.LOCAL_LLM_BASE_URL} ({config.LOCAL_LLM_MODEL})
+Gemini: {config.GEMINI_MODEL} {"(API key set)" if config.GOOGLE_API_KEY else "(no API key)"}
 Whisper: {config.LOCAL_WHISPER_MODEL_SIZE}
 Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
 
@@ -243,6 +268,24 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
     def update_threshold_label(self, val=None):
         """Update the threshold display."""
         self.threshold_label.config(text=f"{self.threshold_var.get():.2f}")
+
+    def on_backend_change(self, event=None):
+        """Handle LLM backend selection change."""
+        new_backend = self.backend_var.get()
+        config.LLM_BACKEND = new_backend
+        self.update_backend_status()
+        print(f"[SETTINGS] LLM backend changed to: {new_backend}")
+
+    def update_backend_status(self):
+        """Update the backend status indicator."""
+        backend = self.backend_var.get()
+        if backend == "gemini":
+            if config.GOOGLE_API_KEY:
+                self.backend_status.config(text="(API key set)", foreground="green")
+            else:
+                self.backend_status.config(text="(No API key!)", foreground="red")
+        else:
+            self.backend_status.config(text=f"({config.LOCAL_LLM_MODEL})", foreground="gray")
 
     def add_files(self):
         """Add audio files to the queue."""

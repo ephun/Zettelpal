@@ -86,7 +86,7 @@ def get_embedding(text: str, model=None) -> np.ndarray | None:
 
 
 # =============================================================================
-# LOCAL LLM CLIENT (OpenAI-compatible)
+# LLM CLIENTS
 # =============================================================================
 
 def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max_tokens: int = None) -> str | None:
@@ -127,6 +127,70 @@ def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, 
 
     print("[LLM FAILURE] Local LLM did not respond after retries.")
     return None
+
+
+def gemini_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max_tokens: int = None) -> str | None:
+    """
+    Sends a chat prompt to Google Gemini API.
+    Returns the text response or None on failure.
+    """
+    if not config.GOOGLE_API_KEY:
+        print("[GEMINI ERROR] GOOGLE_API_KEY not set")
+        return None
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GOOGLE_API_KEY}"
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": temperature,
+        }
+    }
+
+    if max_tokens is not None:
+        payload["generationConfig"]["maxOutputTokens"] = max_tokens
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, json=payload, timeout=120)
+            if resp.status_code != 200:
+                print(f"[GEMINI ERROR] Status {resp.status_code}: {resp.text[:200]}")
+                time.sleep(2 ** (attempt + 1))
+                continue
+
+            data = resp.json()
+            # Extract text from Gemini response
+            candidates = data.get("candidates", [])
+            if candidates:
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+
+            print("[GEMINI ERROR] No content in response")
+            return None
+
+        except requests.exceptions.Timeout:
+            print(f"[GEMINI TIMEOUT] Request timed out (attempt {attempt + 1}/{max_retries})")
+            time.sleep(2 ** (attempt + 1))
+        except Exception as e:
+            print(f"[GEMINI Exception] {e}")
+            time.sleep(2 ** (attempt + 1))
+
+    print("[GEMINI FAILURE] Gemini API did not respond after retries.")
+    return None
+
+
+def llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max_tokens: int = None) -> str | None:
+    """
+    Unified LLM chat function that routes to local or Gemini based on config.LLM_BACKEND.
+    """
+    backend = getattr(config, 'LLM_BACKEND', 'local').lower()
+
+    if backend == "gemini":
+        return gemini_chat(prompt, max_retries, temperature, max_tokens)
+    else:
+        return local_llm_chat(prompt, max_retries, temperature, max_tokens)
 
 
 # =============================================================================

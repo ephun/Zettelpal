@@ -27,6 +27,13 @@ SEGMENTED_OUTPUT_INTERMEDIATE_DIR = os.path.join(ZETTELPAL_ROOT, INTERMEDIATE_DI
 ARCHIVE_DIR = os.path.join("C:/Users/ethan/Documents/ephunism/archive")
 
 # =============================================================================
+# LLM BACKEND SELECTION
+# =============================================================================
+
+# Options: "local" or "gemini"
+LLM_BACKEND = "local"
+
+# =============================================================================
 # LOCAL MODEL CONFIGURATION (Privacy-Focused)
 # =============================================================================
 
@@ -41,7 +48,18 @@ LOCAL_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 LOCAL_LLM_BASE_URL = "http://100.93.31.109:8888/v1"
 LOCAL_LLM_MODEL = "gpt-oss:120b"
 
-# LLM parameters
+# =============================================================================
+# GEMINI CONFIGURATION (Cloud)
+# =============================================================================
+
+# Set via environment variable GOOGLE_API_KEY or directly here
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GEMINI_MODEL = "gemini-2.0-flash"
+
+# =============================================================================
+# LLM PARAMETERS (shared)
+# =============================================================================
+
 SEGMENTATION_LLM_TEMPERATURE = 0.3
 SEGMENTATION_MAX_TOKENS = 8192
 CLASSIFICATION_MAX_TOKENS = 100  # Needs extra tokens for model reasoning
