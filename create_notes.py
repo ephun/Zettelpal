@@ -8,12 +8,16 @@ import utils
 
 
 def sanitize_filename(title: str) -> str:
-    """Convert a title to a filesystem-safe filename stem."""
-    s = title.lower()
-    s = re.sub(r"[^a-z0-9\- ]+", "", s)
-    s = s.replace(" ", "-").strip("-")
+    """Convert a title to a filesystem-safe filename stem, preserving case."""
+    # Remove characters that are invalid in filenames, but keep letters, numbers, spaces, hyphens
+    s = re.sub(r'[<>:"/\\|?*]', '', title)
+    # Replace spaces with hyphens
+    s = s.replace(" ", "-")
+    # Collapse multiple hyphens
     s = re.sub(r'-+', '-', s)
-    return s[:100] if s else "untitled"
+    # Strip leading/trailing hyphens
+    s = s.strip("-")
+    return s[:100] if s else "Untitled"
 
 
 def generate_tags_for_content(content: str) -> list[str]:
@@ -64,12 +68,16 @@ def format_yaml_frontmatter(
     transcript_type_tag: str,
     placement: str,
     semantic_tags: list[str],
-    manual_tags: str = ""
+    manual_tags: str = "",
+    note_id: str = None,
+    created_time: datetime.datetime = None
 ) -> str:
     """Build YAML frontmatter matching the original Zettelpal format."""
-    now = datetime.datetime.now()
-    note_id = now.strftime("%Y%m%d%H%M%S")
-    created_iso = now.isoformat()
+    if created_time is None:
+        created_time = datetime.datetime.now()
+    if note_id is None:
+        note_id = created_time.strftime("%Y%m%d%H%M%S")
+    created_iso = created_time.isoformat()
 
     # Escape title for YAML
     safe_title = title.replace('"', '\\"')
@@ -146,14 +154,20 @@ def create_notes_from_segments(
             print(f"[NOTE] Skipping empty segment: {title}")
             continue
 
-        filename_stem = f"{recording_id}_{sanitize_filename(title)}"
+        # Generate timestamp for this note (matches id in frontmatter)
+        now = datetime.datetime.now()
+        note_id = now.strftime("%Y%m%d%H%M%S")
+
+        # Filename format: "Title-With-Dashes - YYYYMMDDHHMMSS.md"
+        sanitized_title = sanitize_filename(title)
+        filename_stem = f"{sanitized_title} - {note_id}"
         filename = f"{filename_stem}.md"
         filepath = os.path.join(output_dir, filename)
 
         # Avoid overwriting existing files
         counter = 1
         while os.path.exists(filepath):
-            filename_stem = f"{recording_id}_{sanitize_filename(title)}-{counter}"
+            filename_stem = f"{sanitized_title} - {note_id}-{counter}"
             filename = f"{filename_stem}.md"
             filepath = os.path.join(output_dir, filename)
             counter += 1
@@ -167,7 +181,8 @@ def create_notes_from_segments(
         # Build frontmatter
         frontmatter = format_yaml_frontmatter(
             title, emoji, recording_id, transcript_type_tag,
-            placement, semantic_tags, manual_tags_str
+            placement, semantic_tags, manual_tags_str,
+            note_id=note_id, created_time=now
         )
 
         # Build note with H1 heading
