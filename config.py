@@ -52,8 +52,8 @@ LOCAL_LLM_MODEL = "gpt-oss:120b"
 # GEMINI CONFIGURATION (Cloud)
 # =============================================================================
 
-# Set via environment variable GOOGLE_API_KEY or directly here
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+# Set via environment variable GEMINI_API_KEY or GOOGLE_API_KEY
+GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
 
 # =============================================================================
