@@ -165,6 +165,8 @@ def update_all_notes_links(
     Updates chronological and semantic links for notes.
     """
     print(f"Updating links (threshold: {threshold:.2f})...")
+    block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
+    block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
 
     # Group notes by source for chronological linking
     notes_by_source = defaultdict(list)
@@ -243,6 +245,8 @@ def update_all_notes_links(
             elif not last.endswith('\n\n'):
                 parts.append('\n\n')
 
+        parts.append(f"{block_start}\n")
+
         # Get chronological neighbors
         chrono_links = []
         prev_note = None
@@ -281,9 +285,12 @@ def update_all_notes_links(
         current_emb = note.get("embedding")
         if current_emb is not None and filepath in emb_filepath_to_idx:
             current_idx = emb_filepath_to_idx[filepath]
+            current_stem = note.get("filename_stem")
 
             for other_note in all_notes:
                 if other_note["filepath"] == filepath:
+                    continue
+                if current_stem and other_note.get("filename_stem") == current_stem:
                     continue
 
                 other_filepath = other_note["filepath"]
@@ -332,6 +339,8 @@ def update_all_notes_links(
                     display_title=link_info["display_title"]
                 )
                 parts.append(f"{link}\n")
+
+        parts.append(f"{block_end}\n")
 
         # Write file
         try:

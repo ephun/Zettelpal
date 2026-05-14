@@ -70,7 +70,8 @@ def format_yaml_frontmatter(
     semantic_tags: list[str],
     manual_tags: str = "",
     note_id: str = None,
-    created_time: datetime.datetime = None
+    created_time: datetime.datetime = None,
+    audio_path: str = None
 ) -> str:
     """Build YAML frontmatter matching the original Zettelpal format."""
     if created_time is None:
@@ -89,9 +90,16 @@ def format_yaml_frontmatter(
         f"created: {created_iso}",
         f'emoji: "{emoji}"',
         f'source: "{recording_id}"',
+    ]
+
+    if audio_path:
+        safe_audio = audio_path.replace("\\", "/")
+        yaml_lines.append(f'audio: "{safe_audio}"')
+
+    yaml_lines.extend([
         f'placement: "{placement}"',
         "tags:",
-    ]
+    ])
 
     # Collect all tags
     all_tags = []
@@ -130,11 +138,16 @@ def create_notes_from_segments(
     subdir: str,
     recording_id: str,
     transcript_type_tag: str,
-    manual_tags_str: str = ""
+    manual_tags_str: str = "",
+    clip_paths: list[str | None] = None
 ) -> list[dict]:
     """
     Creates Obsidian markdown notes for each segment.
     Generates embeddings and returns metadata for linking.
+
+    Args:
+        clip_paths: Optional list parallel to segmented_data with vault-relative
+                    audio clip paths (or None for segments without clips).
 
     Returns:
         List of dicts with filepath, embedding, title, and filename_stem.
@@ -178,11 +191,27 @@ def create_notes_from_segments(
         # Determine placement
         placement = get_placement(i, total_segments)
 
+        # Get audio clip path for this segment (if available)
+        audio_clip = None
+        if clip_paths and i < len(clip_paths) and clip_paths[i]:
+            # Convert to vault-relative path
+            clip_abs = os.path.abspath(clip_paths[i])
+            vault_dir = os.path.normpath(vault_root)
+            if not vault_dir.endswith(os.sep):
+                vault_dir += os.sep
+            vault_abs = os.path.abspath(vault_dir)
+            is_in_vault = os.path.normcase(clip_abs).startswith(os.path.normcase(vault_abs))
+
+            if is_in_vault:
+                audio_clip = os.path.relpath(clip_abs, vault_abs)
+            else:
+                audio_clip = clip_paths[i]
+
         # Build frontmatter
         frontmatter = format_yaml_frontmatter(
             title, emoji, recording_id, transcript_type_tag,
             placement, semantic_tags, manual_tags_str,
-            note_id=note_id, created_time=now
+            note_id=note_id, created_time=now, audio_path=audio_clip
         )
 
         # Build note with H1 heading

@@ -444,8 +444,27 @@ def extract_frontmatter_and_body(filepath: str) -> tuple[list[str], str, list[st
                 frontmatter_end_index = i + 1
                 break
 
-    # Separate body and link lines
+    # Separate body and generated link lines. Prefer explicit markers when
+    # present; fall back to the legacy trailing-wikilink heuristic for older notes.
     content_lines = all_lines[frontmatter_end_index:]
+    block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
+    block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
+
+    marker_start = -1
+    marker_end = -1
+    for i, line in enumerate(content_lines):
+        if line.strip() == block_start:
+            marker_start = i
+        elif marker_start != -1 and line.strip() == block_end:
+            marker_end = i
+            break
+
+    if marker_start != -1 and marker_end != -1:
+        body_lines = content_lines[:marker_start]
+        link_lines = content_lines[marker_start:marker_end + 1]
+        body_content = "".join(body_lines).strip()
+        return frontmatter_lines, body_content, link_lines
+
     link_pattern = re.compile(r'^\s*(\[\[.*?\]\]\s*[,;-]?\s*)+$')
 
     link_start = -1

@@ -16,7 +16,8 @@ import segment
 import create_notes
 import link_notes
 import classify
-import gui
+import clip
+import vault_integrity
 
 
 def ensure_directories():
@@ -25,6 +26,7 @@ def ensure_directories():
     os.makedirs(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, exist_ok=True)
     os.makedirs(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, exist_ok=True)
     os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
+    os.makedirs(config.CLIPS_DIR, exist_ok=True)
 
     if not os.path.exists(config.OBSIDIAN_VAULT_ROOT):
         print(f"ERROR: Obsidian vault not found at {config.OBSIDIAN_VAULT_ROOT}")
@@ -82,11 +84,22 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
 
     # === STEP 1: TRANSCRIBE ===
     print("\n--- Step 1: Transcribing Audio ---")
-    result = transcribe.transcribe_audio_to_file(audio_filepath, raw_transcript_path)
-    if result is None:
+    transcribe_result = transcribe.transcribe_audio_to_file(audio_filepath, raw_transcript_path)
+    if transcribe_result is None:
         print("ERROR: Transcription failed.")
         return False
+    _, json_sidecar_path = transcribe_result
     print("Transcription complete.")
+
+    # Load whisper timestamp segments
+    whisper_segments = None
+    if json_sidecar_path and os.path.exists(json_sidecar_path):
+        try:
+            with open(json_sidecar_path, "r", encoding="utf-8") as f:
+                whisper_segments = json.load(f)
+            print(f"Loaded {len(whisper_segments)} Whisper timestamp segments.")
+        except Exception as e:
+            print(f"Warning: Could not load timestamps: {e}")
 
     # === STEP 2: CLASSIFY ===
     print("\n--- Step 2: Classifying Transcript ---")
@@ -106,7 +119,7 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
 
     # === STEP 3: SEGMENT ===
     print("\n--- Step 3: Segmenting Transcript ---")
-    segmented_data = segment.segment_transcript(raw_transcript)
+    segmented_data = segment.segment_transcript(raw_transcript, whisper_segments=whisper_segments)
     if not segmented_data:
         print("ERROR: Segmentation failed. Cleaning up.")
         _cleanup_file(raw_transcript_path)
@@ -121,6 +134,17 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     except Exception as e:
         print(f"Warning: Could not save segments: {e}")
 
+    # === STEP 3.5: EXTRACT AUDIO CLIPS ===
+    clip_paths = None
+    has_timestamps = any("audio_start" in seg for seg in segmented_data)
+    if has_timestamps:
+        print("\n--- Step 3.5: Extracting Audio Clips ---")
+        clip_paths = clip.extract_all_clips(
+            audio_filepath, segmented_data, config.CLIPS_DIR, recording_id
+        )
+    else:
+        print("\n--- Step 3.5: Skipping clip extraction (no timestamps) ---")
+
     # === STEP 4: CREATE NOTES ===
     print("\n--- Step 4: Creating Obsidian Notes ---")
     notes_info = create_notes.create_notes_from_segments(
@@ -129,7 +153,8 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
         config.NOTES_SUBDIRECTORY_IN_VAULT,
         recording_id,
         transcript_type,
-        manual_tags
+        manual_tags,
+        clip_paths=clip_paths
     )
 
     if not notes_info:
@@ -137,8 +162,41 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     else:
         print(f"Created {len(notes_info)} notes.")
 
-    # === STEP 5: SEMANTIC LINKING ===
-    print("\n--- Step 5: Semantic Linking ---")
+    # === STEP 5: SOURCE INTEGRITY ===
+    print("\n--- Step 5: Source Integrity Check ---")
+    try:
+        moved_duplicates = vault_integrity.quarantine_duplicate_notes_for_source(
+            os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
+            recording_id,
+        )
+        if moved_duplicates:
+            moved_paths = {item["relative_path"] for item in moved_duplicates}
+            notes_info = [
+                note for note in notes_info
+                if os.path.relpath(note["filepath"], os.path.abspath(config.OBSIDIAN_VAULT_ROOT)).replace("\\", "/")
+                not in moved_paths
+            ]
+            print(f"Quarantined {len(moved_duplicates)} duplicate note(s) for {recording_id}.")
+        else:
+            print("No duplicate notes found for this recording.")
+
+        integrity_issues = vault_integrity.validate_source_integrity(
+            os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
+            recording_id,
+        )
+        if integrity_issues:
+            print(f"Warning: {len(integrity_issues)} integrity issue(s) found for {recording_id}:")
+            for relpath, issue in integrity_issues[:10]:
+                print(f"  - {relpath}: {issue}")
+            if len(integrity_issues) > 10:
+                print(f"  ... and {len(integrity_issues) - 10} more")
+        else:
+            print("Source integrity check passed.")
+    except Exception as e:
+        print(f"Warning: Source integrity check failed: {e}")
+
+    # === STEP 6: SEMANTIC LINKING ===
+    print("\n--- Step 6: Semantic Linking ---")
     try:
         all_notes, _ = link_notes.update_and_load_vault_embeddings(
             os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
@@ -158,8 +216,8 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     except Exception as e:
         print(f"Warning: Linking error: {e}")
 
-    # === STEP 6: ARCHIVE & CLEANUP ===
-    print("\n--- Step 6: Archive & Cleanup ---")
+    # === STEP 7: ARCHIVE & CLEANUP ===
+    print("\n--- Step 7: Archive & Cleanup ---")
 
     # Archive audio
     try:
@@ -174,6 +232,17 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
         print(f"Archived transcript: {os.path.basename(archived_transcript_path)}")
     except Exception as e:
         print(f"Warning: Could not archive transcript: {e}")
+
+    # Archive timestamps JSON sidecar
+    if json_sidecar_path and os.path.exists(json_sidecar_path):
+        archived_json_path = os.path.join(
+            config.ARCHIVE_DIR, f"{recording_id}_{timestamp}.json"
+        )
+        try:
+            shutil.move(json_sidecar_path, archived_json_path)
+            print(f"Archived timestamps: {os.path.basename(archived_json_path)}")
+        except Exception as e:
+            print(f"Warning: Could not archive timestamps: {e}")
 
     # Cleanup segmented JSON
     _cleanup_file(segmented_path)
@@ -233,6 +302,8 @@ def main():
         sys.exit(1)
     else:
         # GUI mode
+        import gui
+
         app = gui.ZettelpalGUI()
         app.mainloop()
 

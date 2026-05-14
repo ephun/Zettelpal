@@ -65,12 +65,14 @@ py-modules = [
     "zettelpal",
     "config",
     "utils",
+    "vault_integrity",
     "transcribe",
     "segment",
     "classify",
     "create_notes",
     "link_notes",
     "delete_notes",
+    "clip",
     "gui",
 ]
 

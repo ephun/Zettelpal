@@ -44,6 +44,10 @@ ENV/
 zettelpal_intermediate/
 zettelpal_debug.log
 zettelpal_graph.graphml
+zettelpal_quarantine/
+zettelpal_psychoanalysis_crawler_prompt_pack/
+zettelpal_psychoanalysis_crawler_prompt_pack.zip
+nul
 
 # Build artifacts
 build/

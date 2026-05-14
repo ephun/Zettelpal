@@ -7,18 +7,10 @@ import threading
 import queue
 import os
 import sys
-import datetime
-import re
-import shutil
-import json
 
 import config
-import transcribe
-import segment
-import create_notes
 import link_notes
 import utils
-import classify
 
 
 class TextRedirector:
@@ -83,6 +75,7 @@ class ZettelpalGUI(tk.Tk):
             os.makedirs(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, exist_ok=True)
             os.makedirs(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, exist_ok=True)
             os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
+            os.makedirs(config.CLIPS_DIR, exist_ok=True)
 
             if not os.path.exists(config.OBSIDIAN_VAULT_ROOT):
                 print(f"ERROR: Obsidian vault not found: {config.OBSIDIAN_VAULT_ROOT}")
@@ -386,96 +379,15 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         self.after(0, lambda: self.set_buttons_state(True))
 
     def _run_pipeline(self, audio_filepath: str, manual_tags: str) -> bool:
-        """Run the full pipeline for one audio file."""
-        audio_basename = os.path.basename(audio_filepath)
-        audio_stem = os.path.splitext(audio_basename)[0]
-        audio_ext = os.path.splitext(audio_basename)[1].lstrip('.')
+        """Run the shared CLI pipeline so GUI and CLI behavior stay identical."""
+        import zettelpal
 
-        if not re.match(r"^\d{6,8}$", audio_stem):
-            print(f"ERROR: Invalid filename format: {audio_stem}")
-            return False
-
-        recording_id = audio_stem
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-
-        raw_path = os.path.join(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, f"{recording_id}.txt")
-        seg_path = os.path.join(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, f"{recording_id}_segmented.json")
-        arch_audio = os.path.join(config.ARCHIVE_DIR, f"{recording_id}_{timestamp}.{audio_ext}")
-        arch_transcript = os.path.join(config.ARCHIVE_DIR, f"{recording_id}_{timestamp}.txt")
-
-        # Step 1: Transcribe
-        print("\n--- Step 1: Transcribe ---")
-        result = transcribe.transcribe_audio_to_file(audio_filepath, raw_path)
-        if result is None:
-            print("ERROR: Transcription failed.")
-            return False
-
-        # Step 2: Classify
-        print("\n--- Step 2: Classify ---")
+        original_threshold = config.SIMILARITY_THRESHOLD
+        config.SIMILARITY_THRESHOLD = self.threshold_var.get()
         try:
-            with open(raw_path, "r", encoding="utf-8") as f:
-                raw_transcript = f.read()
-        except Exception as e:
-            print(f"ERROR: Could not read transcript: {e}")
-            return False
-
-        transcript_type = classify.classify_transcript(raw_transcript)
-        if transcript_type is None:
-            print("ERROR: Classification failed.")
-            self._cleanup(raw_path)
-            return False
-        print(f"Type: {transcript_type}")
-
-        # Step 3: Segment
-        print("\n--- Step 3: Segment ---")
-        segments = segment.segment_transcript(raw_transcript)
-        if not segments:
-            print("ERROR: Segmentation failed.")
-            self._cleanup(raw_path)
-            return False
-
-        # Save segments
-        try:
-            with open(seg_path, "w", encoding="utf-8") as f:
-                json.dump(segments, f, indent=2)
-        except:
-            pass
-
-        # Step 4: Create Notes
-        print("\n--- Step 4: Create Notes ---")
-        notes_info = create_notes.create_notes_from_segments(
-            segments,
-            os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
-            config.NOTES_SUBDIRECTORY_IN_VAULT,
-            recording_id,
-            transcript_type,
-            manual_tags
-        )
-        print(f"Created {len(notes_info)} notes.")
-
-        # Step 5: Link
-        print("\n--- Step 5: Link Notes ---")
-        threshold = self.threshold_var.get()
-        link_notes.run_linking_process(threshold, notes_info)
-
-        # Step 6: Archive
-        print("\n--- Step 6: Archive ---")
-        try:
-            shutil.move(audio_filepath, arch_audio)
-            print(f"Archived: {os.path.basename(arch_audio)}")
-        except Exception as e:
-            print(f"Warning: {e}")
-
-        try:
-            shutil.move(raw_path, arch_transcript)
-            print(f"Archived: {os.path.basename(arch_transcript)}")
-        except Exception as e:
-            print(f"Warning: {e}")
-
-        self._cleanup(seg_path)
-
-        print(f"\nCompleted: {recording_id}")
-        return True
+            return zettelpal.run_pipeline(audio_filepath, manual_tags)
+        finally:
+            config.SIMILARITY_THRESHOLD = original_threshold
 
     def _cleanup(self, filepath: str):
         """Remove a temporary file."""
@@ -526,6 +438,11 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         self.destroy()
 
 
-if __name__ == "__main__":
+def main():
+    """GUI entry point for packaging."""
     app = ZettelpalGUI()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

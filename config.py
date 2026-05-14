@@ -8,7 +8,7 @@ import os
 # =============================================================================
 
 # Your Obsidian vault root directory
-OBSIDIAN_VAULT_ROOT = "C:/Users/ethan/Documents/ephunism"
+OBSIDIAN_VAULT_ROOT = "//PHUNRAID/ephunism"
 
 # Zettelpal working directory (for intermediate files)
 ZETTELPAL_ROOT = os.path.expanduser(
@@ -24,14 +24,17 @@ RAW_TRANSCRIPTS_INTERMEDIATE_DIR = os.path.join(ZETTELPAL_ROOT, INTERMEDIATE_DIR
 SEGMENTED_OUTPUT_INTERMEDIATE_DIR = os.path.join(ZETTELPAL_ROOT, INTERMEDIATE_DIR, "segmented_output")
 
 # Archive directory for processed files
-ARCHIVE_DIR = os.path.join("C:/Users/ethan/Documents/ephunism/archive")
+ARCHIVE_DIR = os.path.join("//PHUNRAID/ephunism/archive")
+
+# Clips directory for extracted audio segments
+CLIPS_DIR = os.path.join(ARCHIVE_DIR, "clips")
 
 # =============================================================================
 # LLM BACKEND SELECTION
 # =============================================================================
 
 # Options: "local" or "gemini"
-LLM_BACKEND = "local"
+LLM_BACKEND = "gemini"
 
 # =============================================================================
 # LOCAL MODEL CONFIGURATION (Privacy-Focused)
@@ -84,6 +87,10 @@ LINK_SEPARATOR = ", "
 CHRONOLOGICAL_LINK_TEMPLATE = "[[{link_target_filename_stem}|{display_title}]]"
 SEMANTIC_LINK_TEMPLATE = "[[{link_target_filename_stem}|{display_title}]]"
 
+# Generated link block markers. Only content between these markers is replaced.
+LINK_BLOCK_START = "<!-- zettelpal-links:start -->"
+LINK_BLOCK_END = "<!-- zettelpal-links:end -->"
+
 # =============================================================================
 # PROMPT TEMPLATES
 # =============================================================================
@@ -128,8 +135,12 @@ Tags should be lowercase and hyphenated, e.g., person/alan-turing, idea/machine-
 
 Return ONLY a JSON list of strings, no commentary.
 
+There are only four valid tag categories: "person", "place", "thing", and "idea".
+
 Example:
 ["person/susan", "idea/personal-growth"]
+
+You may NOT nest tags further ("person/teacher/susan" or "place/utah/salt-lake-city" are *INVALID* tags)
 
 Here is the text to tag:
 {text_content}"""
