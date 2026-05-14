@@ -11,9 +11,15 @@ from collections import Counter, defaultdict
 import config
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+WIKILINK_RE = re.compile(r"\[\[(.*?)\]\]")
 FRONTMATTER_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)\s*$")
 LEGACY_LINK_LINE_RE = re.compile(r"^\s*(\[\[.*?\]\]\s*[,;-]?\s*)+$")
+DEFAULT_EXCLUDED_DIRS = {
+    ".git",
+    ".obsidian",
+    ".trash",
+    "zettelpal_quarantine",
+}
 
 
 def stamp():
@@ -42,6 +48,15 @@ def parse_created(value):
 def normalize_body(text):
     text = re.sub(r"[^a-z0-9\s]", " ", text.lower())
     return re.sub(r"\s+", " ", text).strip()
+
+
+def extract_wikilink_targets(text):
+    targets = []
+    for match in WIKILINK_RE.findall(text):
+        target = re.split(r"[#|]", match, maxsplit=1)[0].strip()
+        if target:
+            targets.append(target)
+    return targets
 
 
 def split_frontmatter(lines):
@@ -143,8 +158,8 @@ def read_note(filepath, vault_root):
         "body": body,
         "body_norm": normalize_body(body),
         "body_len": len(body.strip()),
-        "generated_links": WIKILINK_RE.findall(generated_text),
-        "all_links": WIKILINK_RE.findall("".join(lines)),
+        "generated_links": extract_wikilink_targets(generated_text),
+        "all_links": extract_wikilink_targets("".join(lines)),
         "has_link_markers": has_link_markers,
         "source": source,
         "created": parse_created(
@@ -199,9 +214,14 @@ def main():
     log(f"Scanning vault: {vault_root}")
 
     notes = []
-    for root, _, files in os.walk(vault_root):
-        if os.path.basename(root) == ".obsidian":
-            continue
+    excluded_dirs = set(getattr(config, "EXCLUDED_VAULT_DIRS", DEFAULT_EXCLUDED_DIRS))
+    for root, dirs, files in os.walk(vault_root):
+        dirs[:] = [
+            dirname for dirname in dirs
+            if dirname not in excluded_dirs
+            and "trash" not in dirname.lower()
+            and "quarantine" not in dirname.lower()
+        ]
         for filename in files:
             if filename.lower().endswith(".md"):
                 filepath = os.path.join(root, filename)
@@ -339,7 +359,6 @@ def main():
                 link for link in note["generated_links"] if link in stems
             }
             missing = sorted(expected - actual_same_source)
-            extra = sorted(actual_same_source - expected)
             if missing:
                 add_issue(
                     issues,
@@ -347,14 +366,6 @@ def main():
                     "missing_chronological_link",
                     note["relpath"],
                     f"Source {source} missing chronological links: {missing}",
-                )
-            if extra:
-                add_issue(
-                    issues,
-                    "warning",
-                    "extra_same_source_generated_link",
-                    note["relpath"],
-                    f"Source {source} has non-neighbor generated links: {extra}",
                 )
 
     counts = Counter(issue["code"] for issue in issues)

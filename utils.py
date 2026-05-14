@@ -393,6 +393,8 @@ def find_all_markdown_files(directory: str) -> list[str]:
     if not os.path.exists(directory):
         return []
 
+    excluded_dirs = set(getattr(config, "EXCLUDED_VAULT_DIRS", set()))
+
     cache_realpath = None
     if config.EMBEDDINGS_CACHE_FILE and os.path.exists(os.path.dirname(config.EMBEDDINGS_CACHE_FILE)):
         try:
@@ -400,7 +402,12 @@ def find_all_markdown_files(directory: str) -> list[str]:
         except:
             pass
 
-    for root, _, files in os.walk(directory):
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [
+            d for d in dirs
+            if d not in excluded_dirs and not d.startswith(".trash")
+        ]
+
         for file in files:
             if file.endswith(".md"):
                 filepath = os.path.join(root, file)

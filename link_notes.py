@@ -167,6 +167,7 @@ def update_all_notes_links(
     print(f"Updating links (threshold: {threshold:.2f})...")
     block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
     block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
+    max_semantic_links = getattr(config, "MAX_SEMANTIC_LINKS_PER_NOTE", 10)
 
     # Group notes by source for chronological linking
     notes_by_source = defaultdict(list)
@@ -318,6 +319,8 @@ def update_all_notes_links(
 
             # Sort by similarity
             semantic_links.sort(key=lambda x: x["similarity"], reverse=True)
+            if max_semantic_links is not None and max_semantic_links >= 0:
+                semantic_links = semantic_links[:max_semantic_links]
 
         # Debug output
         note_name = os.path.basename(filepath)

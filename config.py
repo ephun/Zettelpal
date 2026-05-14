@@ -79,6 +79,18 @@ EMBEDDINGS_CACHE_FILE = os.path.join(
 # Cosine similarity threshold for semantic linking (0.0 to 1.0)
 SIMILARITY_THRESHOLD = 0.6
 
+# Maximum generated semantic links per note. Chronological prev/next links do not
+# count toward this limit.
+MAX_SEMANTIC_LINKS_PER_NOTE = 10
+
+# Vault directories that should never be scanned or rewritten.
+EXCLUDED_VAULT_DIRS = {
+    ".git",
+    ".obsidian",
+    ".trash",
+    "zettelpal_quarantine",
+}
+
 # Metadata key for source recording ID
 SOURCE_METADATA_KEY = "source"
 

@@ -12,7 +12,7 @@ import config
 
 
 FRONTMATTER_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)\s*$")
-WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+WIKILINK_RE = re.compile(r"\[\[(.*?)\]\]")
 LEGACY_LINK_LINE_RE = re.compile(r"^\s*(\[\[.*?\]\]\s*[,;-]?\s*)+$")
 
 
@@ -45,6 +45,15 @@ def parse_created(value):
 def normalize_body(text):
     text = re.sub(r"[^a-z0-9\s]", " ", text.lower())
     return re.sub(r"\s+", " ", text).strip()
+
+
+def extract_wikilink_targets(text):
+    targets = []
+    for match in WIKILINK_RE.findall(text):
+        target = re.split(r"[#|]", match, maxsplit=1)[0].strip()
+        if target:
+            targets.append(target)
+    return targets
 
 
 def _split_frontmatter(lines):
@@ -133,7 +142,7 @@ def read_note(filepath, vault_root):
         "body": body,
         "body_norm": normalize_body(body),
         "body_len": len(body.strip()),
-        "generated_links": WIKILINK_RE.findall("".join(generated_link_lines)),
+        "generated_links": extract_wikilink_targets("".join(generated_link_lines)),
         "has_link_markers": has_link_markers,
         "tags": tags,
     }
