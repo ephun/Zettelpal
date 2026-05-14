@@ -85,9 +85,18 @@ def main():
 
         source = "01012601"
         base_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
-        body_a = "This is a note about family systems, memory, and recurring patterns."
-        body_b = "This is a note about clinical reasoning and reflective practice."
-        body_c = "This is a note about creative work, archives, and technical projects."
+        body_a = (
+            "This is a note about family systems, memory, recurring patterns, "
+            "and the way old conversations return in new forms during reflective writing."
+        )
+        body_b = (
+            "This is a note about clinical reasoning, reflective practice, and "
+            "the habit of slowing down before reaching for a conclusion."
+        )
+        body_c = (
+            "This is a note about creative work, archives, technical projects, "
+            "and the practical maintenance required to keep a system useful."
+        )
 
         note_a = write_note(vault, "Alpha - 20260101120000.md", "Alpha", source, base_time, body_a)
         note_b = write_note(vault, "Beta - 20260101120100.md", "Beta", source, base_time + datetime.timedelta(minutes=1), body_b)

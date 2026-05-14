@@ -1,4 +1,5 @@
 import datetime
+import difflib
 import hashlib
 import json
 import os
@@ -209,10 +210,28 @@ class _DisjointSet:
             self.parents[right_root] = left_root
 
 
+def text_duplicate_score(left, right):
+    if not left or not right:
+        return 0.0
+
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if len(shorter) < 100:
+        return 0.0
+
+    if shorter in longer:
+        return 1.0
+
+    matcher = difflib.SequenceMatcher(None, shorter, longer, autojunk=False)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    containment = matched / len(shorter)
+    ratio = matcher.ratio()
+    return max(containment, ratio)
+
+
 def quarantine_duplicate_notes_for_source(
     vault_root,
     recording_id,
-    similarity_threshold=0.92,
+    text_similarity_threshold=0.90,
 ):
     """Move later duplicate notes for a recording into a quarantine folder."""
     vault_root = canonical_dir(vault_root)
@@ -220,7 +239,6 @@ def quarantine_duplicate_notes_for_source(
     if len(source_notes) < 2:
         return []
 
-    cache = _load_embedding_cache()
     dsu = _DisjointSet()
 
     exact_groups = defaultdict(list)
@@ -235,22 +253,13 @@ def quarantine_duplicate_notes_for_source(
             for note in group[1:]:
                 dsu.union(first, note["relpath"])
 
-    embedded_notes = []
-    for note in source_notes:
-        embedding = _embedding_for_note(note, cache)
-        if embedding is not None:
-            embedded_notes.append((note, embedding))
-
-    if len(embedded_notes) > 1:
-        embeddings = np.stack([embedding for _, embedding in embedded_notes])
-        similarities = embeddings @ embeddings.T
-        for row in range(len(embedded_notes)):
-            for col in range(row + 1, len(embedded_notes)):
-                if similarities[row, col] >= similarity_threshold:
-                    dsu.union(
-                        embedded_notes[row][0]["relpath"],
-                        embedded_notes[col][0]["relpath"],
-                    )
+    for row in range(len(source_notes)):
+        for col in range(row + 1, len(source_notes)):
+            left = source_notes[row]
+            right = source_notes[col]
+            score = text_duplicate_score(left["body_norm"], right["body_norm"])
+            if score >= text_similarity_threshold:
+                dsu.union(left["relpath"], right["relpath"])
 
     components = defaultdict(list)
     for relpath in dsu.parents:
@@ -268,6 +277,7 @@ def quarantine_duplicate_notes_for_source(
     if not to_quarantine:
         return []
 
+    cache = _load_embedding_cache()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     quarantine_root = os.path.join(
         config.ZETTELPAL_ROOT,
@@ -305,7 +315,7 @@ def quarantine_duplicate_notes_for_source(
         json.dump(
             {
                 "recording_id": recording_id,
-                "similarity_threshold": similarity_threshold,
+                "text_similarity_threshold": text_similarity_threshold,
                 "moved": moved,
             },
             file,
