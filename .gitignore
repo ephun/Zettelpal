@@ -68,16 +68,11 @@ Desktop.ini
 # Embeddings cache (can be regenerated)
 # zettelpal_embeddings_cache.json
 
-# Temporary test files
-asdf*.py
-
-# Vestigial code
-mistral/
-gemini/
-
 # Claude Code settings
 .claude/
 
-# Windows shortcuts and batch files
+# Windows shortcuts
 *.lnk
-run_zettelpal.bat
+
+# One-off script state
+backfill_progress.json

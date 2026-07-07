@@ -2,6 +2,7 @@
 # Privacy-focused: Uses only local models (Whisper, SentenceTransformers, and local LLM)
 
 import os
+import sys
 
 # =============================================================================
 # DIRECTORY CONFIGURATION
@@ -10,10 +11,14 @@ import os
 # Your Obsidian vault root directory
 OBSIDIAN_VAULT_ROOT = "//PHUNRAID/ephunism"
 
-# Zettelpal working directory (for intermediate files)
-ZETTELPAL_ROOT = os.path.expanduser(
-    "C:/Users/ethan/Documents/R & Python Projects & Vibecoding/Zettelpal"
-)
+# Zettelpal working directory (for intermediate files) — the directory this
+# file lives in, so the app works regardless of where the repo is cloned.
+# In a frozen (PyInstaller) build, __file__ points at a temp extraction dir,
+# so use the executable's directory instead.
+if getattr(sys, "frozen", False):
+    ZETTELPAL_ROOT = os.path.dirname(sys.executable)
+else:
+    ZETTELPAL_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Subdirectory within the vault where notes will be created (empty string = vault root)
 NOTES_SUBDIRECTORY_IN_VAULT = ""
@@ -33,8 +38,9 @@ CLIPS_DIR = os.path.join(ARCHIVE_DIR, "clips")
 # LLM BACKEND SELECTION
 # =============================================================================
 
-# Options: "local" or "gemini"
-LLM_BACKEND = "gemini"
+# Options: "local" or "gemini". Default is local so nothing leaves your
+# machines unless you explicitly opt into a cloud backend.
+LLM_BACKEND = "local"
 
 # =============================================================================
 # LOCAL MODEL CONFIGURATION (Privacy-Focused)
