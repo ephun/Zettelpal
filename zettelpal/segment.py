@@ -4,6 +4,9 @@ import difflib
 import time
 
 from zettelpal import config, llm
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 
 def chunk_transcript(text: str, max_chars: int = 4000) -> list[str]:
@@ -168,37 +171,37 @@ def segment_transcript(transcript: str, whisper_segments: list[dict] = None) -> 
     or None on failure.
     """
     if not transcript or not transcript.strip():
-        print("[SEGMENTER] Empty transcript provided.")
+        log.warning("[SEGMENTER] Empty transcript provided.")
         return None
 
     all_segments = []
     chunks = chunk_transcript(transcript)
 
-    print(f"[SEGMENTER] Transcript split into {len(chunks)} chunk(s).")
+    log.info(f"[SEGMENTER] Transcript split into {len(chunks)} chunk(s).")
 
     for i, chunk in enumerate(chunks):
-        print(f"[SEGMENTER] Processing chunk {i + 1}/{len(chunks)}...")
+        log.info(f"[SEGMENTER] Processing chunk {i + 1}/{len(chunks)}...")
 
         prompt = config.SEGMENTATION_PROMPT_TEMPLATE.format(transcript_chunk=chunk)
 
         llm_response = llm.llm_chat(
             prompt,
-            temperature=config.SEGMENTATION_LLM_TEMPERATURE,
-            max_tokens=config.SEGMENTATION_MAX_TOKENS
+            temperature=config.settings.segmentation_temperature,
+            max_tokens=config.settings.segmentation_max_tokens
         )
 
         if llm_response is None:
-            print(f"[SEGMENTER ERROR] LLM did not return a response for chunk {i + 1}.")
+            log.error(f"[SEGMENTER ERROR] LLM did not return a response for chunk {i + 1}.")
             return None
 
         parsed = llm.extract_json_from_text(llm_response)
         if parsed is None:
-            print(f"[SEGMENTER ERROR] Failed to parse JSON for chunk {i + 1}:")
-            print(llm_response[:500] + "..." if len(llm_response) > 500 else llm_response)
+            log.error(f"[SEGMENTER ERROR] Failed to parse JSON for chunk {i + 1}:")
+            log.error(llm_response[:500] + "..." if len(llm_response) > 500 else llm_response)
             return None
 
         if not isinstance(parsed, list):
-            print(f"[SEGMENTER ERROR] LLM did not return JSON array for chunk {i + 1}.")
+            log.error(f"[SEGMENTER ERROR] LLM did not return JSON array for chunk {i + 1}.")
             return None
 
         # Validate each segment has required fields
@@ -218,13 +221,13 @@ def segment_transcript(transcript: str, whisper_segments: list[dict] = None) -> 
         if i < len(chunks) - 1:
             time.sleep(0.3)
 
-    print(f"[SEGMENTER] Total segments created: {len(all_segments)}")
+    log.info(f"[SEGMENTER] Total segments created: {len(all_segments)}")
 
     # Align segments to audio timestamps if available
     if all_segments and whisper_segments:
-        print("[SEGMENTER] Aligning segments to audio timestamps...")
+        log.info("[SEGMENTER] Aligning segments to audio timestamps...")
         all_segments = align_segments_to_timestamps(all_segments, whisper_segments)
         aligned = sum(1 for s in all_segments if "audio_start" in s)
-        print(f"[SEGMENTER] Aligned {aligned}/{len(all_segments)} segments to timestamps.")
+        log.info(f"[SEGMENTER] Aligned {aligned}/{len(all_segments)} segments to timestamps.")
 
     return all_segments if all_segments else None

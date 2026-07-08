@@ -7,6 +7,9 @@ import time
 import requests
 
 from zettelpal import config
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 
 def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max_tokens: int = None) -> str | None:
@@ -14,10 +17,10 @@ def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, 
     Sends a chat prompt to the local LLM using OpenAI-compatible API.
     Returns the text response or None on failure.
     """
-    url = f"{config.LOCAL_LLM_BASE_URL}/chat/completions"
+    url = f"{config.settings.local_llm_base_url}/chat/completions"
 
     payload = {
-        "model": config.LOCAL_LLM_MODEL,
+        "model": config.settings.local_llm_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
     }
@@ -30,7 +33,7 @@ def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, 
             # Large local models (120B+) can take 10+ minutes per request
             resp = requests.post(url, json=payload, timeout=900)
             if resp.status_code != 200:
-                print(f"[LLM ERROR] Status {resp.status_code}: {resp.text}")
+                log.warning("[LLM ERROR] Status %s: %s", resp.status_code, resp.text)
                 time.sleep(2 ** (attempt + 1))
                 continue
 
@@ -39,13 +42,13 @@ def local_llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, 
             return msg.strip()
 
         except requests.exceptions.Timeout:
-            print(f"[LLM TIMEOUT] Request timed out (attempt {attempt + 1}/{max_retries})")
+            log.warning("[LLM TIMEOUT] Request timed out (attempt %d/%d)", attempt + 1, max_retries)
             time.sleep(2 ** (attempt + 1))
         except Exception as e:
-            print(f"[LLM Exception] {e}")
+            log.warning("[LLM Exception] %s", e)
             time.sleep(2 ** (attempt + 1))
 
-    print("[LLM FAILURE] Local LLM did not respond after retries.")
+    log.error("[LLM FAILURE] Local LLM did not respond after retries.")
     return None
 
 
@@ -54,11 +57,11 @@ def gemini_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max
     Sends a chat prompt to Google Gemini API.
     Returns the text response or None on failure.
     """
-    if not config.GOOGLE_API_KEY:
-        print("[GEMINI ERROR] GOOGLE_API_KEY not set")
+    if not config.settings.gemini_api_key:
+        log.error("[GEMINI ERROR] No API key set (GEMINI_API_KEY or GOOGLE_API_KEY)")
         return None
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={config.GOOGLE_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.settings.gemini_model}:generateContent?key={config.settings.gemini_api_key}"
 
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -74,7 +77,7 @@ def gemini_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max
         try:
             resp = requests.post(url, json=payload, timeout=120)
             if resp.status_code != 200:
-                print(f"[GEMINI ERROR] Status {resp.status_code}: {resp.text[:200]}")
+                log.warning("[GEMINI ERROR] Status %s: %s", resp.status_code, resp.text[:200])
                 time.sleep(2 ** (attempt + 1))
                 continue
 
@@ -86,25 +89,25 @@ def gemini_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max
                 if parts:
                     return parts[0].get("text", "").strip()
 
-            print("[GEMINI ERROR] No content in response")
+            log.error("[GEMINI ERROR] No content in response")
             return None
 
         except requests.exceptions.Timeout:
-            print(f"[GEMINI TIMEOUT] Request timed out (attempt {attempt + 1}/{max_retries})")
+            log.warning("[GEMINI TIMEOUT] Request timed out (attempt %d/%d)", attempt + 1, max_retries)
             time.sleep(2 ** (attempt + 1))
         except Exception as e:
-            print(f"[GEMINI Exception] {e}")
+            log.warning("[GEMINI Exception] %s", e)
             time.sleep(2 ** (attempt + 1))
 
-    print("[GEMINI FAILURE] Gemini API did not respond after retries.")
+    log.error("[GEMINI FAILURE] Gemini API did not respond after retries.")
     return None
 
 
 def llm_chat(prompt: str, max_retries: int = 3, temperature: float = 0.3, max_tokens: int = None) -> str | None:
     """
-    Unified LLM chat function that routes to local or Gemini based on config.LLM_BACKEND.
+    Unified LLM chat function that routes to local or Gemini based on config.settings.llm_backend.
     """
-    backend = getattr(config, 'LLM_BACKEND', 'local').lower()
+    backend = config.settings.llm_backend.lower()
 
     if backend == "gemini":
         return gemini_chat(prompt, max_retries, temperature, max_tokens)
@@ -152,5 +155,5 @@ def extract_json_from_text(text: str):
     except (ValueError, json.JSONDecodeError):
         pass
 
-    print("[JSON ERROR] Could not extract valid JSON from LLM response.")
+    log.error("[JSON ERROR] Could not extract valid JSON from LLM response.")
     return None

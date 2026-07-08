@@ -8,7 +8,7 @@ version = "2.1.0"
 description = "Privacy-focused audio-to-Obsidian notes pipeline using local models"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Ethan"}
 ]
@@ -29,7 +29,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
@@ -42,6 +41,7 @@ dependencies = [
     "numpy>=1.24.0",
     "scikit-learn>=1.3.0",
     "requests>=2.31.0",
+    "pydantic-settings>=2.2.0",
 ]
 
 [project.optional-dependencies]

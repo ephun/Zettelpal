@@ -76,3 +76,6 @@ Desktop.ini
 
 # One-off script state
 backfill_progress.json
+
+# Local settings (copy zettelpal.example.toml)
+zettelpal.toml

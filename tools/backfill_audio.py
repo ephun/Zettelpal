@@ -22,11 +22,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zettelpal import clip, config, models
+from zettelpal.log import setup_console_logging
 from zettelpal.vault import notes
 
 
-PROGRESS_FILE = os.path.join(config.ZETTELPAL_ROOT, "backfill_progress.json")
-BACKUP_DIR = os.path.join(config.ARCHIVE_DIR, "backups")
+PROGRESS_FILE = os.path.join(config.settings.data_dir, "backfill_progress.json")
+BACKUP_DIR = os.path.join(config.settings.resolved_archive_dir, "backups")
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".ogg", ".flac", ".webm", ".mp4", ".aac"}
 
 
@@ -52,7 +53,7 @@ def scan_vault_notes() -> dict[str, list[dict]]:
     Returns {recording_id: [note_info, ...]} where note_info has
     filepath, frontmatter_lines, body, link_lines, placement, created.
     """
-    md_files = notes.find_all_markdown_files(config.OBSIDIAN_VAULT_ROOT)
+    md_files = notes.find_all_markdown_files(config.settings.vault_root)
     notes_by_recording = {}
 
     for filepath in md_files:
@@ -99,10 +100,10 @@ def scan_archive_audio() -> dict[str, str]:
     Uses the first 8 chars (MMDDYYNN) as recording_id.
     """
     audio_map = {}
-    if not os.path.exists(config.ARCHIVE_DIR):
+    if not os.path.exists(config.settings.resolved_archive_dir):
         return audio_map
 
-    for filename in os.listdir(config.ARCHIVE_DIR):
+    for filename in os.listdir(config.settings.resolved_archive_dir):
         _, ext = os.path.splitext(filename)
         if ext.lower() not in AUDIO_EXTENSIONS:
             continue
@@ -115,7 +116,7 @@ def scan_archive_audio() -> dict[str, str]:
             rec_id = match.group(1)
             # Prefer the first (or only) audio file found
             if rec_id not in audio_map:
-                audio_map[rec_id] = os.path.join(config.ARCHIVE_DIR, filename)
+                audio_map[rec_id] = os.path.join(config.settings.resolved_archive_dir, filename)
 
     return audio_map
 
@@ -408,7 +409,7 @@ def process_recording(
         stats["matched"] += 1
 
     # === Pass 3: Extract clips and update frontmatter ===
-    vault_abs = os.path.abspath(config.OBSIDIAN_VAULT_ROOT)
+    vault_abs = os.path.abspath(config.settings.vault_root)
 
     for i, note_info in enumerate(sorted_notes):
         if match_results[i] is None:
@@ -420,7 +421,7 @@ def process_recording(
         basename = os.path.basename(filepath)
 
         clip_filename = f"{recording_id}_{i + 1:02d}{audio_ext}"
-        clip_path = os.path.join(config.CLIPS_DIR, clip_filename)
+        clip_path = os.path.join(config.settings.clips_dir, clip_filename)
 
         clip_abs = os.path.abspath(clip_path)
         if clip_abs.startswith(vault_abs):
@@ -432,7 +433,7 @@ def process_recording(
             label = "GAP-FILL" if confidence == 0.0 else f"conf:{confidence:.2f}"
             print(f"  -> [DRY RUN] {basename}: clip {clip_filename} ({audio_start:.1f}s - {audio_end:.1f}s, {label})")
         else:
-            os.makedirs(config.CLIPS_DIR, exist_ok=True)
+            os.makedirs(config.settings.clips_dir, exist_ok=True)
             success = clip.extract_clip(audio_path, audio_start, audio_end, clip_path)
             if not success:
                 print(f"  -> ERROR: clip extraction failed for {basename}")
@@ -470,6 +471,8 @@ def main():
         help="Reset progress tracking and reprocess all recordings."
     )
     args = parser.parse_args()
+
+    setup_console_logging()
 
     if args.dry_run:
         print("[BACKFILL] === DRY RUN MODE — no files will be modified ===\n")

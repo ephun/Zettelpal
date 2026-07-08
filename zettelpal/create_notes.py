@@ -4,8 +4,11 @@ import datetime
 import os
 
 from zettelpal import config, llm, models
+from zettelpal.log import get_logger
 from zettelpal.naming import sanitize_filename
 from zettelpal.vault import cache as vault_cache
+
+log = get_logger(__name__)
 
 
 def generate_tags_for_content(content: str) -> list[str]:
@@ -18,11 +21,11 @@ def generate_tags_for_content(content: str) -> list[str]:
 
     prompt = config.GRANULAR_TAGGING_PROMPT_TEMPLATE.format(text_content=content[:3000])
 
-    print("[TAGGING] Generating semantic tags...")
+    log.info("[TAGGING] Generating semantic tags...")
     response = llm.llm_chat(prompt, temperature=0.3, max_tokens=500)
 
     if not response:
-        print("[TAGGING] No response from LLM")
+        log.warning("[TAGGING] No response from LLM")
         return []
 
     # Try to parse as JSON list
@@ -30,10 +33,10 @@ def generate_tags_for_content(content: str) -> list[str]:
     if parsed and isinstance(parsed, list):
         # Filter to only valid string tags
         tags = [t for t in parsed if isinstance(t, str) and t.strip()]
-        print(f"[TAGGING] Generated {len(tags)} tags")
+        log.info(f"[TAGGING] Generated {len(tags)} tags")
         return tags
 
-    print(f"[TAGGING] Could not parse tags from: {response[:100]}")
+    log.warning(f"[TAGGING] Could not parse tags from: {response[:100]}")
     return []
 
 
@@ -152,7 +155,7 @@ def create_notes_from_segments(
         content = seg.get("content", "")
 
         if not content.strip():
-            print(f"[NOTE] Skipping empty segment: {title}")
+            log.info(f"[NOTE] Skipping empty segment: {title}")
             continue
 
         # Generate timestamp for this note (matches id in frontmatter)
@@ -209,17 +212,17 @@ def create_notes_from_segments(
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(full_note)
-            print(f"[NOTE CREATED] {os.path.basename(filepath)}")
+            log.info(f"[NOTE CREATED] {os.path.basename(filepath)}")
         except OSError as e:
-            print(f"[NOTE ERROR] Could not write {filepath}: {e}")
+            log.error(f"[NOTE ERROR] Could not write {filepath}: {e}")
             continue
 
         # Generate embedding
-        print(f"[EMBED] Generating embedding for: {os.path.basename(filepath)}")
+        log.info(f"[EMBED] Generating embedding for: {os.path.basename(filepath)}")
         embedding = models.get_embedding(full_note)
 
         if embedding is None:
-            print(f"[EMBED WARNING] Embedding failed for: {filename}")
+            log.warning(f"[EMBED WARNING] Embedding failed for: {filename}")
             continue
 
         # Update cache

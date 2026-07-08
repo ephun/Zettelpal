@@ -5,6 +5,9 @@ import os
 import time
 
 from zettelpal import models
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 
 def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple[str, str] | None:
@@ -21,10 +24,10 @@ def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple
     """
     model = models.load_whisper_model()
     if model is None:
-        print("ERROR: Whisper model failed to load.")
+        log.error("ERROR: Whisper model failed to load.")
         return None
 
-    print(f"Transcribing: {os.path.basename(audio_filepath)}")
+    log.info(f"Transcribing: {os.path.basename(audio_filepath)}")
 
     try:
         start_time = time.time()
@@ -32,7 +35,7 @@ def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple
         raw_transcript = result["text"]
         elapsed = time.time() - start_time
 
-        print(f"Transcription complete ({elapsed:.1f}s)")
+        log.info(f"Transcription complete ({elapsed:.1f}s)")
 
         # Ensure output directory exists
         os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
@@ -50,10 +53,10 @@ def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(whisper_segments, f, indent=2)
 
-        print(f"Saved to: {output_filepath}")
-        print(f"Timestamps saved to: {json_path}")
+        log.info(f"Saved to: {output_filepath}")
+        log.info(f"Timestamps saved to: {json_path}")
         return (os.path.abspath(output_filepath), os.path.abspath(json_path))
 
     except Exception as e:
-        print(f"ERROR: Transcription failed: {e}")
+        log.error(f"ERROR: Transcription failed: {e}")
         return None

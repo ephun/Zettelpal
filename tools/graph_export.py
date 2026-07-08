@@ -11,6 +11,7 @@ from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zettelpal import config
+from zettelpal.log import setup_console_logging
 from zettelpal.vault import linking as link_notes
 
 def export_to_graphml(vault_root: str, similarity_threshold: float, chronological_weight: float, output_filepath: str):
@@ -33,7 +34,7 @@ def export_to_graphml(vault_root: str, similarity_threshold: float, chronologica
     print(f"Assigning chronological links a fixed weight of: {chronological_weight:.2f}")
 
     # Load all note data from cache, which includes metadata like source and created
-    all_vault_notes_data = link_notes.update_and_load_vault_embeddings(vault_root, config.EMBEDDINGS_CACHE_FILE)
+    all_vault_notes_data, _ = link_notes.update_and_load_vault_embeddings(vault_root, config.settings.embeddings_cache_file)
 
     if len(all_vault_notes_data) < 2:
         print("Not enough notes with valid embeddings to create a graph. Exiting.")
@@ -150,8 +151,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--threshold",
         type=float,
-        default=config.SIMILARITY_THRESHOLD,
-        help=f"Cosine similarity threshold for creating a link (default: {config.SIMILARITY_THRESHOLD:.2f})."
+        default=config.settings.similarity_threshold,
+        help=f"Cosine similarity threshold for creating a link (default: {config.settings.similarity_threshold:.2f})."
     )
     parser.add_argument(
         "--chrono_weight",
@@ -167,10 +168,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    setup_console_logging()
+
     # Get the output path, resolving relative paths
     output_path = os.path.abspath(args.output)
     
     # Ensure the directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    export_to_graphml(config.OBSIDIAN_VAULT_ROOT, args.threshold, args.chrono_weight, output_path)
+    export_to_graphml(config.settings.vault_root, args.threshold, args.chrono_weight, output_path)

@@ -1,0 +1,44 @@
+# Zettelpal configuration template.
+#
+# Copy this file to zettelpal.toml (next to the repo root or the built exe)
+# and uncomment what you want to change. Anything not set here falls back to
+# the built-in defaults; environment variables prefixed ZETTELPAL_ override
+# both (e.g. ZETTELPAL_VAULT_ROOT, ZETTELPAL_LLM_BACKEND).
+
+# --- Paths ---
+# Obsidian vault root directory.
+#vault_root = "//PHUNRAID/ephunism"
+# Subdirectory within the vault where notes are created ("" = vault root).
+#notes_subdirectory = ""
+# Where intermediate files and the quarantine live (default: app root).
+#data_dir = ""
+# Where processed recordings are archived (default: <vault_root>/archive).
+#archive_dir = ""
+
+# --- LLM backend ---
+# "local" keeps everything on your machines; "gemini" sends transcript text
+# to Google.
+#llm_backend = "local"
+# Whisper model for transcription: tiny/base/small/medium/large/large-v3.
+#whisper_model_size = "medium"
+# SentenceTransformers model for embeddings.
+#embedding_model = "all-MiniLM-L6-v2"
+# Local LLM (any OpenAI-compatible API).
+#local_llm_base_url = "http://100.93.31.109:8888/v1"
+#local_llm_model = "gpt-oss:120b"
+# Gemini (cloud) backend. Prefer setting the API key via the GEMINI_API_KEY
+# environment variable instead of writing it into this file.
+#gemini_model = "gemini-2.0-flash"
+
+# --- LLM parameters ---
+#segmentation_temperature = 0.3
+#segmentation_max_tokens = 8192
+#classification_max_tokens = 100
+
+# --- Embeddings & linking ---
+# Cosine similarity threshold for semantic linking (0.0 to 1.0).
+#similarity_threshold = 0.6
+# Chronological prev/next links do not count toward this limit.
+#max_semantic_links_per_note = 10
+# Vault directories that are never scanned or rewritten.
+#excluded_vault_dirs = [".git", ".obsidian", ".trash", "zettelpal_quarantine"]

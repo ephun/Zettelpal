@@ -1,6 +1,7 @@
 # gui.py - Zettelpal GUI
 # Tkinter interface for the Zettelpal pipeline
 
+import logging
 import os
 import queue
 import sys
@@ -9,25 +10,27 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from zettelpal import config, naming, pipeline
+from zettelpal.log import LOGGER_NAME, get_logger
 from zettelpal.vault import linking
 
+log = get_logger(__name__)
 
-class TextRedirector:
-    """Redirects stdout/stderr to a Tkinter Text widget."""
+
+class TkLogHandler(logging.Handler):
+    """Forwards log records to a Tkinter Text widget via a queue, so worker
+    threads can log safely while the Tk main loop does the widget updates."""
 
     def __init__(self, widget):
+        super().__init__()
         self.widget = widget
         self.queue = queue.Queue()
         self.update_interval = 100
-        self.widget.after(self.update_interval, self.update_text)
+        self.widget.after(self.update_interval, self._drain)
 
-    def write(self, text):
-        self.queue.put(text)
+    def emit(self, record):
+        self.queue.put(self.format(record) + "\n")
 
-    def flush(self):
-        pass
-
-    def update_text(self):
+    def _drain(self):
         try:
             while True:
                 text = self.queue.get_nowait()
@@ -38,7 +41,23 @@ class TextRedirector:
         except queue.Empty:
             pass
         finally:
-            self.widget.after(self.update_interval, self.update_text)
+            self.widget.after(self.update_interval, self._drain)
+
+
+class StreamToLogger:
+    """File-like shim so third-party writes to stdout/stderr (Whisper progress,
+    tracebacks) reach the log — and don't crash under pythonw, where the real
+    streams are missing."""
+
+    def __init__(self, level: int):
+        self.level = level
+
+    def write(self, text):
+        if text and text.strip():
+            log.log(self.level, text.rstrip())
+
+    def flush(self):
+        pass
 
 
 class ZettelpalGUI(tk.Tk):
@@ -63,45 +82,45 @@ class ZettelpalGUI(tk.Tk):
         self.processing_thread = None
 
         self.create_widgets()
-        self.redirect_stdout()
+        self.attach_logging()
         self.check_directories()
 
     def check_directories(self):
         """Initial directory validation."""
-        print("Checking directories...")
+        log.info("Checking directories...")
         try:
-            os.makedirs(config.ZETTELPAL_ROOT, exist_ok=True)
-            os.makedirs(config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, exist_ok=True)
-            os.makedirs(config.SEGMENTED_OUTPUT_INTERMEDIATE_DIR, exist_ok=True)
-            os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
-            os.makedirs(config.CLIPS_DIR, exist_ok=True)
+            os.makedirs(config.settings.data_dir, exist_ok=True)
+            os.makedirs(config.settings.raw_transcripts_dir, exist_ok=True)
+            os.makedirs(config.settings.segmented_output_dir, exist_ok=True)
+            os.makedirs(config.settings.resolved_archive_dir, exist_ok=True)
+            os.makedirs(config.settings.clips_dir, exist_ok=True)
 
-            if not os.path.exists(config.OBSIDIAN_VAULT_ROOT):
-                print(f"ERROR: Obsidian vault not found: {config.OBSIDIAN_VAULT_ROOT}")
+            if not os.path.exists(config.settings.vault_root):
+                log.error(f"ERROR: Obsidian vault not found: {config.settings.vault_root}")
                 messagebox.showerror(
                     "Configuration Error",
-                    f"Obsidian vault not found:\n{config.OBSIDIAN_VAULT_ROOT}"
+                    f"Obsidian vault not found:\n{config.settings.vault_root}"
                 )
                 return False
 
-            notes_dir = os.path.join(config.OBSIDIAN_VAULT_ROOT, config.NOTES_SUBDIRECTORY_IN_VAULT)
+            notes_dir = os.path.join(config.settings.vault_root, config.settings.notes_subdirectory)
             os.makedirs(notes_dir, exist_ok=True)
 
-            cache_dir = os.path.dirname(config.EMBEDDINGS_CACHE_FILE)
+            cache_dir = os.path.dirname(config.settings.embeddings_cache_file)
             os.makedirs(cache_dir, exist_ok=True)
 
-            print("All directories ready.")
-            backend = getattr(config, 'LLM_BACKEND', 'local')
-            print(f"LLM Backend: {backend}")
+            log.info("All directories ready.")
+            backend = config.settings.llm_backend
+            log.info(f"LLM Backend: {backend}")
             if backend == "gemini":
-                print(f"Gemini Model: {config.GEMINI_MODEL}")
+                log.info(f"Gemini Model: {config.settings.gemini_model}")
             else:
-                print(f"Local LLM: {config.LOCAL_LLM_BASE_URL}")
-                print(f"Model: {config.LOCAL_LLM_MODEL}")
+                log.info(f"Local LLM: {config.settings.local_llm_base_url}")
+                log.info(f"Model: {config.settings.local_llm_model}")
             return True
 
         except Exception as e:
-            print(f"ERROR: Directory setup failed: {e}")
+            log.error(f"ERROR: Directory setup failed: {e}")
             messagebox.showerror("Setup Error", str(e))
             return False
 
@@ -181,7 +200,7 @@ class ZettelpalGUI(tk.Tk):
         backend_frame = ttk.Frame(settings_tab)
         backend_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
 
-        self.backend_var = tk.StringVar(value=getattr(config, 'LLM_BACKEND', 'local'))
+        self.backend_var = tk.StringVar(value=config.settings.llm_backend)
         self.backend_combo = ttk.Combobox(
             backend_frame, textvariable=self.backend_var,
             values=["local", "gemini"], state="readonly", width=15
@@ -210,9 +229,9 @@ class ZettelpalGUI(tk.Tk):
         threshold_frame = ttk.Frame(settings_tab)
         threshold_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
 
-        self.threshold_var = tk.DoubleVar(value=config.SIMILARITY_THRESHOLD)
+        self.threshold_var = tk.DoubleVar(value=config.settings.similarity_threshold)
         self.threshold_label = ttk.Label(
-            threshold_frame, text=f"{config.SIMILARITY_THRESHOLD:.2f}"
+            threshold_frame, text=f"{config.settings.similarity_threshold:.2f}"
         )
         self.threshold_label.pack(side=tk.LEFT, padx=(0, 10))
 
@@ -238,11 +257,11 @@ class ZettelpalGUI(tk.Tk):
         row += 1
 
         info_text = f"""Configuration:
-Vault: {config.OBSIDIAN_VAULT_ROOT}
-Local LLM: {config.LOCAL_LLM_BASE_URL} ({config.LOCAL_LLM_MODEL})
-Gemini: {config.GEMINI_MODEL} {"(API key set)" if config.GOOGLE_API_KEY else "(no API key)"}
-Whisper: {config.LOCAL_WHISPER_MODEL_SIZE}
-Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
+Vault: {config.settings.vault_root}
+Local LLM: {config.settings.local_llm_base_url} ({config.settings.local_llm_model})
+Gemini: {config.settings.gemini_model} {"(API key set)" if config.settings.gemini_api_key else "(no API key)"}
+Whisper: {config.settings.whisper_model_size}
+Embeddings: {config.settings.embedding_model}"""
 
         info_label = ttk.Label(
             settings_tab, text=info_text, justify=tk.LEFT,
@@ -250,12 +269,16 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         )
         info_label.grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
-    def redirect_stdout(self):
-        """Redirect stdout and stderr to console."""
-        self.console_text.configure(state='normal')
-        sys.stdout = TextRedirector(self.console_text)
-        sys.stderr = TextRedirector(self.console_text)
-        print("Zettelpal ready.")
+    def attach_logging(self):
+        """Send zettelpal log output to the console widget."""
+        logger = logging.getLogger(LOGGER_NAME)
+        logger.setLevel(logging.INFO)
+        handler = TkLogHandler(self.console_text)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(handler)
+        sys.stdout = StreamToLogger(logging.INFO)
+        sys.stderr = StreamToLogger(logging.ERROR)
+        log.info("Zettelpal ready.")
 
     def update_threshold_label(self, val=None):
         """Update the threshold display."""
@@ -264,20 +287,20 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
     def on_backend_change(self, event=None):
         """Handle LLM backend selection change."""
         new_backend = self.backend_var.get()
-        config.LLM_BACKEND = new_backend
+        config.settings.llm_backend = new_backend
         self.update_backend_status()
-        print(f"[SETTINGS] LLM backend changed to: {new_backend}")
+        log.info(f"[SETTINGS] LLM backend changed to: {new_backend}")
 
     def update_backend_status(self):
         """Update the backend status indicator."""
         backend = self.backend_var.get()
         if backend == "gemini":
-            if config.GOOGLE_API_KEY:
+            if config.settings.gemini_api_key:
                 self.backend_status.config(text="(API key set)", foreground="green")
             else:
                 self.backend_status.config(text="(No API key!)", foreground="red")
         else:
-            self.backend_status.config(text=f"({config.LOCAL_LLM_MODEL})", foreground="gray")
+            self.backend_status.config(text=f"({config.settings.local_llm_model})", foreground="gray")
 
     def add_files(self):
         """Add audio files to the queue."""
@@ -295,12 +318,12 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
 
             # Check/rename to Zettelpal format
             if not naming.is_valid_zettelpal_filename(filename):
-                print(f"Renaming {filename} to Zettelpal format...")
+                log.info(f"Renaming {filename} to Zettelpal format...")
                 renamed = naming.rename_audio_file_to_zettelpal_format(filepath)
                 if renamed:
                     filepath = renamed
                 else:
-                    print(f"Failed to rename {filename}. Skipping.")
+                    log.info(f"Failed to rename {filename}. Skipping.")
                     continue
 
             if filepath not in self.audio_files:
@@ -308,7 +331,7 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
                 self.file_listbox.insert(tk.END, os.path.basename(filepath))
 
         if files:
-            print(f"Added {len(files)} file(s) to queue.")
+            log.info(f"Added {len(files)} file(s) to queue.")
 
     def remove_files(self):
         """Remove selected files from queue."""
@@ -350,9 +373,9 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         self.tags_entry.delete(0, tk.END)
 
         self.set_buttons_state(False)
-        print("\n" + "=" * 50)
-        print("STARTING PIPELINE")
-        print("=" * 50)
+        log.info("\n" + "=" * 50)
+        log.info("STARTING PIPELINE")
+        log.info("=" * 50)
 
         self.processing_thread = threading.Thread(target=self._process_queue)
         self.processing_thread.start()
@@ -361,30 +384,28 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         """Process files in the queue (runs in thread)."""
         while not self.processing_queue.empty():
             filepath, tags = self.processing_queue.get()
-            print(f"\nProcessing: {os.path.basename(filepath)}")
+            log.info(f"\nProcessing: {os.path.basename(filepath)}")
             if tags:
-                print(f"Tags: {tags}")
+                log.info(f"Tags: {tags}")
 
             try:
                 self._run_pipeline(filepath, tags)
-            except Exception as e:
-                print(f"ERROR: {e}")
-                import traceback
-                traceback.print_exc()
+            except Exception:
+                log.exception("Pipeline failed")
 
-        print("\n" + "=" * 50)
-        print("ALL FILES PROCESSED")
-        print("=" * 50)
+        log.info("\n" + "=" * 50)
+        log.info("ALL FILES PROCESSED")
+        log.info("=" * 50)
         self.after(0, lambda: self.set_buttons_state(True))
 
     def _run_pipeline(self, audio_filepath: str, manual_tags: str) -> bool:
         """Run the shared pipeline so GUI and CLI behavior stay identical."""
-        original_threshold = config.SIMILARITY_THRESHOLD
-        config.SIMILARITY_THRESHOLD = self.threshold_var.get()
+        original_threshold = config.settings.similarity_threshold
+        config.settings.similarity_threshold = self.threshold_var.get()
         try:
             return pipeline.run_pipeline(audio_filepath, manual_tags)
         finally:
-            config.SIMILARITY_THRESHOLD = original_threshold
+            config.settings.similarity_threshold = original_threshold
 
     def recalculate_links(self):
         """Recalculate all semantic links."""
@@ -394,7 +415,7 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
 
         self.set_buttons_state(False)
         threshold = self.threshold_var.get()
-        print(f"\nRecalculating all links (threshold: {threshold:.2f})...")
+        log.info(f"\nRecalculating all links (threshold: {threshold:.2f})...")
 
         self.processing_thread = threading.Thread(
             target=self._relink_thread, args=(threshold,)
@@ -406,13 +427,11 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         try:
             success = linking.run_linking_process(threshold)
             if success:
-                print("Link recalculation complete.")
+                log.info("Link recalculation complete.")
             else:
-                print("Link recalculation failed.")
-        except Exception as e:
-            print(f"ERROR: {e}")
-            import traceback
-            traceback.print_exc()
+                log.info("Link recalculation failed.")
+        except Exception:
+            log.exception("Link recalculation failed")
         finally:
             self.after(0, lambda: self.set_buttons_state(True))
 

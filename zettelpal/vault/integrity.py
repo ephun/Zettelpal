@@ -128,8 +128,7 @@ def quarantine_duplicate_notes_for_source(
     cache = vault_cache.load_embedding_cache()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     quarantine_root = os.path.join(
-        config.ZETTELPAL_ROOT,
-        "zettelpal_quarantine",
+        config.settings.quarantine_dir,
         f"pipeline_duplicates_{recording_id}_{timestamp}",
     )
     os.makedirs(quarantine_root, exist_ok=True)

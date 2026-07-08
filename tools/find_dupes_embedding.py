@@ -11,6 +11,7 @@ from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zettelpal import config, models
+from zettelpal.log import setup_console_logging
 from zettelpal.vault import notes
 
 def find_near_duplicates(vault_root, similarity_threshold):
@@ -147,5 +148,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    setup_console_logging()
+
     # Use the vault root from your config file
-    find_near_duplicates(config.OBSIDIAN_VAULT_ROOT, args.threshold)
+    find_near_duplicates(config.settings.vault_root, args.threshold)

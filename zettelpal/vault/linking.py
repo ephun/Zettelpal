@@ -8,8 +8,11 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from zettelpal import config, models
+from zettelpal.log import get_logger
 from zettelpal.vault import cache as vault_cache
 from zettelpal.vault import notes
+
+log = get_logger(__name__)
 
 
 def update_and_load_vault_embeddings(
@@ -23,7 +26,7 @@ def update_and_load_vault_embeddings(
     Returns:
         tuple: (list of valid notes with embeddings, whether any updates occurred)
     """
-    print(f"Loading vault embeddings from: {cache_filepath}")
+    log.info(f"Loading vault embeddings from: {cache_filepath}")
     cache = vault_cache.load_embedding_cache()
     updated_cache = cache.copy()
     update_needed = False
@@ -31,11 +34,11 @@ def update_and_load_vault_embeddings(
     new_note_paths = {n.get("filepath") for n in new_notes_info or []}
     any_updates = bool(new_note_paths)
 
-    print(f"Scanning vault: {vault_root}")
+    log.info(f"Scanning vault: {vault_root}")
     all_md_files = notes.find_all_markdown_files(vault_root)
     found_relative_paths = {os.path.relpath(f, vault_root) for f in all_md_files}
 
-    print(f"Found {len(all_md_files)} markdown files.")
+    log.info(f"Found {len(all_md_files)} markdown files.")
 
     current_notes = []
 
@@ -138,17 +141,17 @@ def update_and_load_vault_embeddings(
     # Remove deleted files from cache
     for relative_path in list(updated_cache.keys()):
         if relative_path not in found_relative_paths:
-            print(f"Removing deleted note from cache: {relative_path}")
+            log.info(f"Removing deleted note from cache: {relative_path}")
             del updated_cache[relative_path]
             update_needed = True
             any_updates = True
 
     # Save cache if changed
     if update_needed:
-        print("Saving updated cache...")
+        log.info("Saving updated cache...")
         vault_cache.save_embedding_cache(updated_cache)
     else:
-        print("Cache is up-to-date.")
+        log.info("Cache is up-to-date.")
 
     # Filter notes that have valid embeddings
     valid_notes = [n for n in current_notes if n.get("embedding") is not None]
@@ -165,10 +168,10 @@ def update_all_notes_links(
     """
     Updates chronological and semantic links for notes.
     """
-    print(f"Updating links (threshold: {threshold:.2f})...")
-    block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
-    block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
-    max_semantic_links = getattr(config, "MAX_SEMANTIC_LINKS_PER_NOTE", 10)
+    log.info(f"Updating links (threshold: {threshold:.2f})...")
+    block_start = config.LINK_BLOCK_START
+    block_end = config.LINK_BLOCK_END
+    max_semantic_links = config.settings.max_semantic_links_per_note
 
     # Group notes by source for chronological linking
     notes_by_source = defaultdict(list)
@@ -189,28 +192,28 @@ def update_all_notes_links(
     # Determine if full update needed
     force_update = False
     if last_threshold is None or abs(threshold - last_threshold) > 1e-6:
-        print("Threshold changed. Full recalculation.")
+        log.info("Threshold changed. Full recalculation.")
         force_update = True
     elif any_note_was_updated_or_created:
-        print("Notes changed. Full recalculation.")
+        log.info("Notes changed. Full recalculation.")
         force_update = True
 
     notes_to_update = all_notes if force_update else []
 
     if not notes_to_update:
-        print("No link updates needed.")
+        log.info("No link updates needed.")
         return
 
-    print(f"Updating links for {len(notes_to_update)} notes...")
+    log.info(f"Updating links for {len(notes_to_update)} notes...")
 
     # Build similarity matrix
     notes_with_embeddings = [n for n in all_notes if n["embedding"] is not None]
     if not notes_with_embeddings:
-        print("No notes with embeddings.")
+        log.info("No notes with embeddings.")
         return
 
-    print(f"[LINK DEBUG] {len(notes_with_embeddings)} notes have embeddings")
-    print(f"[LINK DEBUG] Computing {len(notes_with_embeddings)}x{len(notes_with_embeddings)} similarity matrix...")
+    log.debug(f"[LINK DEBUG] {len(notes_with_embeddings)} notes have embeddings")
+    log.debug(f"[LINK DEBUG] Computing {len(notes_with_embeddings)}x{len(notes_with_embeddings)} similarity matrix...")
 
     all_embeddings = np.array([n["embedding"] for n in notes_with_embeddings])
     emb_filepath_to_idx = {n["filepath"]: i for i, n in enumerate(notes_with_embeddings)}
@@ -221,9 +224,9 @@ def update_all_notes_links(
         # Show similarity distribution
         upper_tri = sim_matrix[np.triu_indices(len(sim_matrix), k=1)]
         if len(upper_tri) > 0:
-            print(f"[LINK DEBUG] Similarity stats: min={upper_tri.min():.3f}, max={upper_tri.max():.3f}, mean={upper_tri.mean():.3f}")
+            log.debug(f"[LINK DEBUG] Similarity stats: min={upper_tri.min():.3f}, max={upper_tri.max():.3f}, mean={upper_tri.mean():.3f}")
             above_threshold = np.sum(upper_tri >= threshold)
-            print(f"[LINK DEBUG] {above_threshold} pairs above threshold {threshold:.2f}")
+            log.debug(f"[LINK DEBUG] {above_threshold} pairs above threshold {threshold:.2f}")
 
     # Process each note
     for note in notes_to_update:
@@ -326,14 +329,14 @@ def update_all_notes_links(
         # Debug output
         note_name = os.path.basename(filepath)
         if semantic_links:
-            print(f"[LINK] {note_name}: {len(semantic_links)} semantic links found")
+            log.info(f"[LINK] {note_name}: {len(semantic_links)} semantic links found")
             # Show top 3 matches
             for link_info in semantic_links[:3]:
-                print(f"       -> {link_info['display_title'][:40]:<40} (sim: {link_info['similarity']:.3f})")
+                log.info(f"       -> {link_info['display_title'][:40]:<40} (sim: {link_info['similarity']:.3f})")
             if len(semantic_links) > 3:
-                print(f"       ... and {len(semantic_links) - 3} more")
+                log.info(f"       ... and {len(semantic_links) - 3} more")
         else:
-            print(f"[LINK] {note_name}: no semantic links above threshold {threshold:.2f}")
+            log.info(f"[LINK] {note_name}: no semantic links above threshold {threshold:.2f}")
 
         # Write semantic links
         if semantic_links:
@@ -355,24 +358,22 @@ def update_all_notes_links(
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(final)
         except OSError as e:
-            print(f"Error writing {os.path.basename(filepath)}: {e}")
+            log.error(f"Error writing {os.path.basename(filepath)}: {e}")
 
 
 def run_linking_process(threshold: float, new_notes_info: list[dict] = None) -> bool:
     """
     Main function to run the linking process.
     """
-    print(f"\n--- Linking Process (threshold: {threshold:.2f}) ---")
+    log.info(f"\n--- Linking Process (threshold: {threshold:.2f}) ---")
 
-    if not os.path.exists(config.OBSIDIAN_VAULT_ROOT):
-        print(f"ERROR: Vault not found: {config.OBSIDIAN_VAULT_ROOT}")
+    if not os.path.exists(config.settings.vault_root):
+        log.error(f"Vault not found: {config.settings.vault_root}")
         return False
 
     try:
         # Load last threshold
-        threshold_file = os.path.join(
-            config.OBSIDIAN_VAULT_ROOT, ".obsidian", "zettelpal_last_threshold.json"
-        )
+        threshold_file = config.settings.last_threshold_file
         last_threshold = None
         if os.path.exists(threshold_file):
             try:
@@ -383,13 +384,13 @@ def run_linking_process(threshold: float, new_notes_info: list[dict] = None) -> 
 
         # Update cache and load embeddings
         all_notes, any_updates = update_and_load_vault_embeddings(
-            os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
-            config.EMBEDDINGS_CACHE_FILE,
+            os.path.abspath(config.settings.vault_root),
+            config.settings.embeddings_cache_file,
             new_notes_info
         )
 
         if not all_notes:
-            print("No notes found for linking.")
+            log.info("No notes found for linking.")
             return True
 
         # Update links
@@ -405,13 +406,11 @@ def run_linking_process(threshold: float, new_notes_info: list[dict] = None) -> 
             with open(threshold_file, "w", encoding="utf-8") as f:
                 json.dump({"threshold": threshold}, f)
         except OSError as e:
-            print(f"Warning: Could not save threshold: {e}")
+            log.warning(f"Could not save threshold: {e}")
 
-        print("--- Linking Complete ---")
+        log.info("--- Linking Complete ---")
         return True
 
-    except Exception as e:
-        print(f"ERROR: Linking failed: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        log.exception("Linking failed")
         return False

@@ -38,7 +38,7 @@ def main():
     )
     parser.add_argument(
         "--vault",
-        default=config.OBSIDIAN_VAULT_ROOT,
+        default=config.settings.vault_root,
         help="Vault root to scan.",
     )
     parser.add_argument(
@@ -57,7 +57,7 @@ def main():
     log(f"Scanning vault: {vault_root}")
 
     notes = []
-    excluded_dirs = set(getattr(config, "EXCLUDED_VAULT_DIRS", {".git", ".obsidian", ".trash", "zettelpal_quarantine"}))
+    excluded_dirs = set(config.settings.excluded_vault_dirs)
     for root, dirs, files in os.walk(vault_root):
         dirs[:] = [
             dirname for dirname in dirs

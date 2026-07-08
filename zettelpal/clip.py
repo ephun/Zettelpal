@@ -3,6 +3,10 @@
 import os
 import subprocess
 
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
+
 
 def extract_clip(audio_path: str, start_sec: float, end_sec: float, output_path: str) -> bool:
     """
@@ -19,7 +23,7 @@ def extract_clip(audio_path: str, start_sec: float, end_sec: float, output_path:
     """
     duration = end_sec - start_sec
     if duration <= 0:
-        print(f"[CLIP] Invalid duration ({duration:.1f}s), skipping.")
+        log.warning(f"[CLIP] Invalid duration ({duration:.1f}s), skipping.")
         return False
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -53,10 +57,10 @@ def extract_clip(audio_path: str, start_sec: float, end_sec: float, output_path:
             )
             return True
         except subprocess.CalledProcessError as e2:
-            print(f"[CLIP ERROR] ffmpeg failed: {e2.stderr[:200]}")
+            log.error(f"[CLIP ERROR] ffmpeg failed: {e2.stderr[:200]}")
             return False
     except FileNotFoundError:
-        print("[CLIP ERROR] ffmpeg not found. Please install ffmpeg.")
+        log.error("[CLIP ERROR] ffmpeg not found. Please install ffmpeg.")
         return False
 
 
@@ -93,20 +97,24 @@ def extract_all_clips(
         clip_filename = f"{recording_id}_{i + 1:02d}{ext}"
         clip_path = os.path.join(output_dir, clip_filename)
 
-        print(f"[CLIP] Extracting {clip_filename} ({start:.1f}s - {end:.1f}s)")
+        log.info(f"[CLIP] Extracting {clip_filename} ({start:.1f}s - {end:.1f}s)")
         if extract_clip(audio_path, start, end, clip_path):
             clip_paths.append(clip_path)
         else:
             clip_paths.append(None)
 
     extracted = sum(1 for p in clip_paths if p is not None)
-    print(f"[CLIP] Extracted {extracted}/{len(segments)} clips.")
+    log.info(f"[CLIP] Extracted {extracted}/{len(segments)} clips.")
     return clip_paths
 
 
 if __name__ == "__main__":
     import argparse
     import sys
+
+    from zettelpal.log import setup_console_logging
+
+    setup_console_logging()
 
     parser = argparse.ArgumentParser(description="Extract an audio clip using ffmpeg.")
     parser.add_argument("audio_file", help="Source audio file.")

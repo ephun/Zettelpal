@@ -8,6 +8,7 @@ import wave
 import numpy as np
 
 from zettelpal import clip, config
+from zettelpal.log import setup_console_logging
 from zettelpal.vault import integrity as vault_integrity
 from zettelpal.vault import linking as link_notes
 
@@ -66,21 +67,22 @@ def assert_true(condition, message):
 
 
 def main():
+    setup_console_logging()
     temp_root = tempfile.mkdtemp(prefix="zettelpal_stress_")
-    original_vault = config.OBSIDIAN_VAULT_ROOT
-    original_cache = config.EMBEDDINGS_CACHE_FILE
-    original_quarantine_root = config.ZETTELPAL_ROOT
-    original_max_links = getattr(config, "MAX_SEMANTIC_LINKS_PER_NOTE", None)
+    original_vault = config.settings.vault_root
+    original_data_dir = config.settings.data_dir
+    original_max_links = config.settings.max_semantic_links_per_note
 
     try:
         vault = os.path.join(temp_root, "vault")
         os.makedirs(os.path.join(vault, ".obsidian"), exist_ok=True)
-        cache_path = os.path.join(vault, ".obsidian", "zettelpal_embeddings_cache.json")
 
-        config.OBSIDIAN_VAULT_ROOT = vault
-        config.EMBEDDINGS_CACHE_FILE = cache_path
-        config.ZETTELPAL_ROOT = temp_root
-        config.MAX_SEMANTIC_LINKS_PER_NOTE = 2
+        config.settings.vault_root = vault
+        config.settings.data_dir = temp_root
+        config.settings.max_semantic_links_per_note = 2
+
+        # Derived from vault_root, so it points into the temp vault.
+        cache_path = config.settings.embeddings_cache_file
 
         source = "01012601"
         base_time = datetime.datetime(2026, 1, 1, 12, 0, 0)
@@ -130,7 +132,7 @@ def main():
         all_notes, _ = link_notes.update_and_load_vault_embeddings(vault, cache_path, [])
         link_notes.update_all_notes_links(
             all_notes,
-            config.SIMILARITY_THRESHOLD,
+            config.settings.similarity_threshold,
             last_threshold=None,
             any_note_was_updated_or_created=True,
         )
@@ -154,13 +156,9 @@ def main():
 
         print(json.dumps({"status": "ok", "temp_root": temp_root, "duplicate_moved": moved}, indent=2))
     finally:
-        config.OBSIDIAN_VAULT_ROOT = original_vault
-        config.EMBEDDINGS_CACHE_FILE = original_cache
-        config.ZETTELPAL_ROOT = original_quarantine_root
-        if original_max_links is None:
-            delattr(config, "MAX_SEMANTIC_LINKS_PER_NOTE")
-        else:
-            config.MAX_SEMANTIC_LINKS_PER_NOTE = original_max_links
+        config.settings.vault_root = original_vault
+        config.settings.data_dir = original_data_dir
+        config.settings.max_semantic_links_per_note = original_max_links
         shutil.rmtree(temp_root, ignore_errors=True)
 
 

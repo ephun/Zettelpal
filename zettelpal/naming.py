@@ -5,6 +5,9 @@ import os
 import re
 
 from zettelpal import config
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 
 def sanitize_filename(title: str) -> str:
@@ -32,7 +35,7 @@ def rename_audio_file_to_zettelpal_format(filepath: str) -> str | None:
     Renames an audio file to MMDDYYNN.ext format based on modification time.
     """
     if not os.path.exists(filepath):
-        print(f"Error: File not found: {filepath}")
+        log.error(f"Error: File not found: {filepath}")
         return None
 
     try:
@@ -43,7 +46,7 @@ def rename_audio_file_to_zettelpal_format(filepath: str) -> str | None:
         # Find next available NN
         next_nn = _get_next_available_nn(date_prefix)
         if len(next_nn) > 2:
-            print(f"Error: Too many recordings for date {date_prefix}")
+            log.error(f"Error: Too many recordings for date {date_prefix}")
             return None
 
         _, ext = os.path.splitext(filepath)
@@ -51,15 +54,15 @@ def rename_audio_file_to_zettelpal_format(filepath: str) -> str | None:
         new_filepath = os.path.join(os.path.dirname(filepath), new_filename)
 
         if os.path.exists(new_filepath):
-            print(f"Error: Target file already exists: {new_filename}")
+            log.error(f"Error: Target file already exists: {new_filename}")
             return None
 
         os.rename(filepath, new_filepath)
-        print(f"Renamed to: {new_filename}")
+        log.info(f"Renamed to: {new_filename}")
         return os.path.abspath(new_filepath)
 
     except Exception as e:
-        print(f"Error renaming file: {e}")
+        log.error(f"Error renaming file: {e}")
         return None
 
 
@@ -67,7 +70,7 @@ def _get_next_available_nn(date_prefix: str) -> str:
     """Finds next available sequential number for a date prefix."""
     max_nn = -1
 
-    dirs_to_check = [config.RAW_TRANSCRIPTS_INTERMEDIATE_DIR, config.ARCHIVE_DIR]
+    dirs_to_check = [config.settings.raw_transcripts_dir, config.settings.resolved_archive_dir]
 
     for check_dir in dirs_to_check:
         if os.path.exists(check_dir):

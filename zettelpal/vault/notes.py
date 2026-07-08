@@ -11,6 +11,9 @@ import os
 import re
 
 from zettelpal import config
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 FRONTMATTER_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)\s*$")
 WIKILINK_RE = re.compile(r"\[\[(.*?)\]\]")
@@ -90,8 +93,8 @@ def split_body_and_generated_links(content_lines: list[str]) -> tuple[str, list[
     Returns:
         (body_text, link_lines, has_link_markers)
     """
-    block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
-    block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
+    block_start = config.LINK_BLOCK_START
+    block_end = config.LINK_BLOCK_END
 
     marker_start = -1
     marker_end = -1
@@ -180,12 +183,12 @@ def find_all_markdown_files(directory: str) -> list[str]:
     if not os.path.exists(directory):
         return []
 
-    excluded_dirs = set(getattr(config, "EXCLUDED_VAULT_DIRS", set()))
+    excluded_dirs = set(config.settings.excluded_vault_dirs)
 
     cache_realpath = None
-    if config.EMBEDDINGS_CACHE_FILE and os.path.exists(os.path.dirname(config.EMBEDDINGS_CACHE_FILE)):
+    if config.settings.embeddings_cache_file and os.path.exists(os.path.dirname(config.settings.embeddings_cache_file)):
         try:
-            cache_realpath = os.path.realpath(config.EMBEDDINGS_CACHE_FILE)
+            cache_realpath = os.path.realpath(config.settings.embeddings_cache_file)
         except OSError:
             pass
 
@@ -225,7 +228,7 @@ def extract_frontmatter_and_body(filepath: str) -> tuple[list[str], str, list[st
         with open(filepath, 'r', encoding='utf-8') as f:
             all_lines = f.readlines()
     except OSError as e:
-        print(f"Error reading file {filepath}: {e}")
+        log.error(f"Error reading file {filepath}: {e}")
         return [], "", []
 
     frontmatter_lines = []

@@ -53,8 +53,8 @@ def main():
     )
     parser.add_argument(
         "--vault",
-        default=config.OBSIDIAN_VAULT_ROOT,
-        help=f"Vault path (default: {config.OBSIDIAN_VAULT_ROOT})"
+        default=config.settings.vault_root,
+        help=f"Vault path (default: {config.settings.vault_root})"
     )
     parser.add_argument(
         "--force", "-f",

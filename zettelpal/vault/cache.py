@@ -7,6 +7,9 @@ import os
 import numpy as np
 
 from zettelpal import config
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 
 class _NpEncoder(json.JSONEncoder):
@@ -20,37 +23,37 @@ class _NpEncoder(json.JSONEncoder):
 
 def load_embedding_cache() -> dict:
     """Loads the embedding cache from JSON file."""
-    if os.path.exists(config.EMBEDDINGS_CACHE_FILE):
+    if os.path.exists(config.settings.embeddings_cache_file):
         try:
-            with open(config.EMBEDDINGS_CACHE_FILE, "r", encoding="utf-8") as f:
+            with open(config.settings.embeddings_cache_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if not isinstance(data, dict):
-                    print("Warning: Cache file is not a dictionary. Creating new one.")
+                    log.warning("Warning: Cache file is not a dictionary. Creating new one.")
                     return {}
                 return data
         except json.JSONDecodeError as e:
-            print(f"Warning: Could not decode embedding cache: {e}")
+            log.warning(f"Warning: Could not decode embedding cache: {e}")
             return {}
         except OSError as e:
-            print(f"Warning: Error loading embedding cache: {e}")
+            log.warning(f"Warning: Error loading embedding cache: {e}")
             return {}
     return {}
 
 
 def save_embedding_cache(cache: dict):
     """Saves the embedding cache to JSON file."""
-    os.makedirs(os.path.dirname(config.EMBEDDINGS_CACHE_FILE), exist_ok=True)
+    os.makedirs(os.path.dirname(config.settings.embeddings_cache_file), exist_ok=True)
     try:
-        with open(config.EMBEDDINGS_CACHE_FILE, "w", encoding="utf-8") as f:
+        with open(config.settings.embeddings_cache_file, "w", encoding="utf-8") as f:
             json.dump(cache, f, indent=2, cls=_NpEncoder)
     except OSError as e:
-        print(f"Error saving embedding cache: {e}")
+        log.error(f"Error saving embedding cache: {e}")
 
 
 def update_embedding_cache(filepath: str, embedding: np.ndarray):
     """Updates a single entry in the embedding cache."""
     cache = load_embedding_cache()
-    relative_path = os.path.relpath(filepath, config.OBSIDIAN_VAULT_ROOT)
+    relative_path = os.path.relpath(filepath, config.settings.vault_root)
     cache[relative_path] = {
         "embedding": embedding.tolist() if embedding is not None else None,
         "mtime": os.path.getmtime(filepath) if os.path.exists(filepath) else None,

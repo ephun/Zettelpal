@@ -1,6 +1,9 @@
 # classify.py - Transcript Classification via the configured LLM backend
 
 from zettelpal import config, llm
+from zettelpal.log import get_logger
+
+log = get_logger(__name__)
 
 
 # Maximum characters to send for classification (truncate long transcripts)
@@ -19,7 +22,7 @@ def classify_transcript(transcript_text: str) -> str | None:
     Returns the classification tag or None on failure.
     """
     if not transcript_text or not transcript_text.strip():
-        print("[CLASSIFY] Empty transcript provided.")
+        log.warning("[CLASSIFY] Empty transcript provided.")
         return None
 
     # Truncate if necessary
@@ -31,18 +34,18 @@ def classify_transcript(transcript_text: str) -> str | None:
 
     prompt = config.CLASSIFICATION_PROMPT_TEMPLATE.format(transcript_content=truncated)
 
-    print(f"\n[CLASSIFY] Sending transcript to LLM ({len(truncated)} chars)...")
+    log.info(f"\n[CLASSIFY] Sending transcript to LLM ({len(truncated)} chars)...")
 
     response_text = llm.llm_chat(
         prompt,
         temperature=0.2,
-        max_tokens=config.CLASSIFICATION_MAX_TOKENS
+        max_tokens=config.settings.classification_max_tokens
     )
 
-    print(f"[CLASSIFY] Raw response: {repr(response_text)}")
+    log.debug(f"[CLASSIFY] Raw response: {repr(response_text)}")
 
     if not response_text:
-        print("[CLASSIFY] ERROR: Empty response from LLM")
+        log.error("[CLASSIFY] ERROR: Empty response from LLM")
         return None
 
     cleaned = response_text.strip().lower()
@@ -59,5 +62,5 @@ def classify_transcript(transcript_text: str) -> str | None:
     if "type/thought" in cleaned or cleaned == "thought":
         return "type/thought"
 
-    print(f"[CLASSIFY] Unrecognized classifier output: {cleaned}")
+    log.warning(f"[CLASSIFY] Unrecognized classifier output: {cleaned}")
     return None

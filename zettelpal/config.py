@@ -1,101 +1,155 @@
 # config.py - Zettelpal Configuration
-# Privacy-focused: Uses only local models (Whisper, SentenceTransformers, and local LLM)
+# Privacy-focused: defaults to local models (Whisper, SentenceTransformers, local LLM).
+#
+# Settings load in priority order:
+#   1. Environment variables prefixed ZETTELPAL_ (e.g. ZETTELPAL_VAULT_ROOT)
+#   2. zettelpal.toml next to the app root (repo root, or the exe when frozen)
+#   3. Built-in defaults below
+# See zettelpal.example.toml for a documented template.
 
 import os
 import sys
+from typing import Literal
 
-# =============================================================================
-# DIRECTORY CONFIGURATION
-# =============================================================================
-
-# Your Obsidian vault root directory
-OBSIDIAN_VAULT_ROOT = "//PHUNRAID/ephunism"
-
-# Zettelpal working directory (for intermediate files) — the repo root, one
-# level above this package, so the app works regardless of where the repo is
-# cloned. In a frozen (PyInstaller) build, __file__ points at a temp
-# extraction dir, so use the executable's directory instead.
-if getattr(sys, "frozen", False):
-    ZETTELPAL_ROOT = os.path.dirname(sys.executable)
-else:
-    ZETTELPAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Subdirectory within the vault where notes will be created (empty string = vault root)
-NOTES_SUBDIRECTORY_IN_VAULT = ""
-
-# Intermediate file directories
-INTERMEDIATE_DIR = "zettelpal_intermediate"
-RAW_TRANSCRIPTS_INTERMEDIATE_DIR = os.path.join(ZETTELPAL_ROOT, INTERMEDIATE_DIR, "raw_transcripts")
-SEGMENTED_OUTPUT_INTERMEDIATE_DIR = os.path.join(ZETTELPAL_ROOT, INTERMEDIATE_DIR, "segmented_output")
-
-# Archive directory for processed files
-ARCHIVE_DIR = os.path.join("//PHUNRAID/ephunism/archive")
-
-# Clips directory for extracted audio segments
-CLIPS_DIR = os.path.join(ARCHIVE_DIR, "clips")
-
-# =============================================================================
-# LLM BACKEND SELECTION
-# =============================================================================
-
-# Options: "local" or "gemini". Default is local so nothing leaves your
-# machines unless you explicitly opt into a cloud backend.
-LLM_BACKEND = "local"
-
-# =============================================================================
-# LOCAL MODEL CONFIGURATION (Privacy-Focused)
-# =============================================================================
-
-# Whisper model for local transcription
-# Options: tiny, base, small, medium, large, large-v2, large-v3
-LOCAL_WHISPER_MODEL_SIZE = "medium"
-
-# SentenceTransformers model for local embeddings
-LOCAL_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-
-# Local LLM configuration (OpenAI-compatible API)
-LOCAL_LLM_BASE_URL = "http://100.93.31.109:8888/v1"
-LOCAL_LLM_MODEL = "gpt-oss:120b"
-
-# =============================================================================
-# GEMINI CONFIGURATION (Cloud)
-# =============================================================================
-
-# Set via environment variable GEMINI_API_KEY or GOOGLE_API_KEY
-GOOGLE_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"
-
-# =============================================================================
-# LLM PARAMETERS (shared)
-# =============================================================================
-
-SEGMENTATION_LLM_TEMPERATURE = 0.3
-SEGMENTATION_MAX_TOKENS = 8192
-CLASSIFICATION_MAX_TOKENS = 100  # Needs extra tokens for model reasoning
-
-# =============================================================================
-# EMBEDDINGS & LINKING CONFIGURATION
-# =============================================================================
-
-# Cache file for storing note embeddings
-EMBEDDINGS_CACHE_FILE = os.path.join(
-    OBSIDIAN_VAULT_ROOT, ".obsidian", "zettelpal_embeddings_cache.json"
+from pydantic import AliasChoices, Field
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
 )
 
-# Cosine similarity threshold for semantic linking (0.0 to 1.0)
-SIMILARITY_THRESHOLD = 0.6
 
-# Maximum generated semantic links per note. Chronological prev/next links do not
-# count toward this limit.
-MAX_SEMANTIC_LINKS_PER_NOTE = 10
+def app_root() -> str:
+    """Directory the app runs from: the repo root in a checkout, or the
+    executable's directory in a frozen (PyInstaller) build, where __file__
+    points at a temp extraction dir."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Vault directories that should never be scanned or rewritten.
-EXCLUDED_VAULT_DIRS = {
-    ".git",
-    ".obsidian",
-    ".trash",
-    "zettelpal_quarantine",
-}
+
+CONFIG_FILE = os.path.join(app_root(), "zettelpal.toml")
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="ZETTELPAL_",
+        toml_file=CONFIG_FILE,
+        extra="ignore",
+    )
+
+    # --- Paths ---
+    # Obsidian vault root directory.
+    vault_root: str = "//PHUNRAID/ephunism"
+    # Subdirectory within the vault where notes are created ("" = vault root).
+    notes_subdirectory: str = ""
+    # Where intermediate files and the quarantine live.
+    data_dir: str = Field(default_factory=app_root)
+    # Where processed recordings are archived ("" = <vault_root>/archive).
+    archive_dir: str = ""
+
+    # --- LLM backend ---
+    # "local" keeps everything on your machines; "gemini" sends transcript
+    # text to Google. Nothing leaves the network unless you opt in here.
+    llm_backend: Literal["local", "gemini"] = "local"
+    # Whisper model for transcription: tiny/base/small/medium/large/large-v3.
+    whisper_model_size: str = "medium"
+    # SentenceTransformers model for embeddings.
+    embedding_model: str = "all-MiniLM-L6-v2"
+    # Local LLM (any OpenAI-compatible API).
+    local_llm_base_url: str = "http://100.93.31.109:8888/v1"
+    local_llm_model: str = "gpt-oss:120b"
+    # Gemini (cloud) backend.
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_api_key: str = Field(
+        "",
+        validation_alias=AliasChoices(
+            "ZETTELPAL_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"
+        ),
+    )
+
+    # --- LLM parameters ---
+    segmentation_temperature: float = 0.3
+    segmentation_max_tokens: int = 8192
+    # Needs headroom for model reasoning before the one-line answer.
+    classification_max_tokens: int = 100
+
+    # --- Embeddings & linking ---
+    # Cosine similarity threshold for semantic linking (0.0 to 1.0).
+    similarity_threshold: float = Field(0.6, ge=0.0, le=1.0)
+    # Chronological prev/next links do not count toward this limit.
+    max_semantic_links_per_note: int = 10
+    # Vault directories that are never scanned or rewritten.
+    excluded_vault_dirs: set[str] = {
+        ".git",
+        ".obsidian",
+        ".trash",
+        "zettelpal_quarantine",
+    }
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            TomlConfigSettingsSource(settings_cls),
+            file_secret_settings,
+        )
+
+    # --- Derived paths (follow the fields above, including runtime changes) ---
+
+    @property
+    def notes_dir(self) -> str:
+        if self.notes_subdirectory:
+            return os.path.join(self.vault_root, self.notes_subdirectory)
+        return self.vault_root
+
+    @property
+    def resolved_archive_dir(self) -> str:
+        return self.archive_dir or os.path.join(self.vault_root, "archive")
+
+    @property
+    def clips_dir(self) -> str:
+        return os.path.join(self.resolved_archive_dir, "clips")
+
+    @property
+    def raw_transcripts_dir(self) -> str:
+        return os.path.join(self.data_dir, "zettelpal_intermediate", "raw_transcripts")
+
+    @property
+    def segmented_output_dir(self) -> str:
+        return os.path.join(self.data_dir, "zettelpal_intermediate", "segmented_output")
+
+    @property
+    def quarantine_dir(self) -> str:
+        return os.path.join(self.data_dir, "zettelpal_quarantine")
+
+    @property
+    def embeddings_cache_file(self) -> str:
+        return os.path.join(
+            self.vault_root, ".obsidian", "zettelpal_embeddings_cache.json"
+        )
+
+    @property
+    def last_threshold_file(self) -> str:
+        return os.path.join(
+            self.vault_root, ".obsidian", "zettelpal_last_threshold.json"
+        )
+
+
+settings = Settings()
+
+# =============================================================================
+# INTERNAL CONSTANTS (not user configuration)
+# =============================================================================
 
 # Metadata key for source recording ID
 SOURCE_METADATA_KEY = "source"
