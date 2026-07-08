@@ -19,9 +19,10 @@ import shutil
 import sys
 import time
 
-import config
-import clip
-import utils
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from zettelpal import clip, config, models
+from zettelpal.vault import notes
 
 
 PROGRESS_FILE = os.path.join(config.ZETTELPAL_ROOT, "backfill_progress.json")
@@ -51,12 +52,12 @@ def scan_vault_notes() -> dict[str, list[dict]]:
     Returns {recording_id: [note_info, ...]} where note_info has
     filepath, frontmatter_lines, body, link_lines, placement, created.
     """
-    md_files = utils.find_all_markdown_files(config.OBSIDIAN_VAULT_ROOT)
+    md_files = notes.find_all_markdown_files(config.OBSIDIAN_VAULT_ROOT)
     notes_by_recording = {}
 
     for filepath in md_files:
-        fm_lines, body, link_lines = utils.extract_frontmatter_and_body(filepath)
-        source = utils.extract_source_from_frontmatter(fm_lines)
+        fm_lines, body, link_lines = notes.extract_frontmatter_and_body(filepath)
+        source = notes.extract_source_from_frontmatter(fm_lines)
         if not source:
             continue
 
@@ -76,8 +77,8 @@ def scan_vault_notes() -> dict[str, list[dict]]:
                 break
 
         # Extract created timestamp
-        created_str = utils.extract_created_timestamp_str_from_frontmatter(fm_lines)
-        created_dt = utils.parse_created_timestamp_str(created_str) if created_str else None
+        created_str = notes.extract_created_timestamp_str_from_frontmatter(fm_lines)
+        created_dt = notes.parse_created(created_str) if created_str else None
 
         notes_by_recording.setdefault(source, []).append({
             "filepath": filepath,
@@ -133,7 +134,7 @@ def sort_notes_by_order(notes: list[dict]) -> list[dict]:
 
 def transcribe_with_timestamps(audio_path: str) -> list[dict] | None:
     """Re-runs Whisper on audio to get timestamp segments."""
-    model = utils.load_whisper_model()
+    model = models.load_whisper_model()
     if model is None:
         print("[BACKFILL] ERROR: Whisper model failed to load.")
         return None

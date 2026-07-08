@@ -3,7 +3,8 @@
 import json
 import os
 import time
-import utils
+
+from zettelpal import models
 
 
 def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple[str, str] | None:
@@ -18,7 +19,7 @@ def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple
         A tuple of (text_path, json_path) if successful, None otherwise.
         The JSON sidecar contains Whisper's segment-level timestamps.
     """
-    model = utils.load_whisper_model()
+    model = models.load_whisper_model()
     if model is None:
         print("ERROR: Whisper model failed to load.")
         return None
@@ -56,20 +57,3 @@ def transcribe_audio_to_file(audio_filepath: str, output_filepath: str) -> tuple
     except Exception as e:
         print(f"ERROR: Transcription failed: {e}")
         return None
-
-
-if __name__ == "__main__":
-    import argparse
-    import sys
-
-    parser = argparse.ArgumentParser(description="Transcribe audio using local Whisper.")
-    parser.add_argument("audio_file", help="Path to the audio file.")
-    parser.add_argument("output_file", help="Path for the transcript output.")
-    args = parser.parse_args()
-
-    if not os.path.exists(args.audio_file):
-        print(f"ERROR: File not found: {args.audio_file}")
-        sys.exit(1)
-
-    result = transcribe_audio_to_file(args.audio_file, args.output_file)
-    sys.exit(0 if result else 1)

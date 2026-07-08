@@ -1,16 +1,15 @@
 # gui.py - Zettelpal GUI
-# Modern tkinter interface for the Zettelpal pipeline
+# Tkinter interface for the Zettelpal pipeline
 
-import tkinter as tk
-from tkinter import filedialog, scrolledtext, messagebox, ttk
-import threading
-import queue
 import os
+import queue
 import sys
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-import config
-import link_notes
-import utils
+from zettelpal import config, naming, pipeline
+from zettelpal.vault import linking
 
 
 class TextRedirector:
@@ -295,9 +294,9 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
             filename = os.path.basename(filepath)
 
             # Check/rename to Zettelpal format
-            if not utils.is_valid_zettelpal_filename(filename):
+            if not naming.is_valid_zettelpal_filename(filename):
                 print(f"Renaming {filename} to Zettelpal format...")
-                renamed = utils.rename_audio_file_to_zettelpal_format(filepath)
+                renamed = naming.rename_audio_file_to_zettelpal_format(filepath)
                 if renamed:
                     filepath = renamed
                 else:
@@ -379,23 +378,13 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
         self.after(0, lambda: self.set_buttons_state(True))
 
     def _run_pipeline(self, audio_filepath: str, manual_tags: str) -> bool:
-        """Run the shared CLI pipeline so GUI and CLI behavior stay identical."""
-        import zettelpal
-
+        """Run the shared pipeline so GUI and CLI behavior stay identical."""
         original_threshold = config.SIMILARITY_THRESHOLD
         config.SIMILARITY_THRESHOLD = self.threshold_var.get()
         try:
-            return zettelpal.run_pipeline(audio_filepath, manual_tags)
+            return pipeline.run_pipeline(audio_filepath, manual_tags)
         finally:
             config.SIMILARITY_THRESHOLD = original_threshold
-
-    def _cleanup(self, filepath: str):
-        """Remove a temporary file."""
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-        except:
-            pass
 
     def recalculate_links(self):
         """Recalculate all semantic links."""
@@ -415,7 +404,7 @@ Embeddings: {config.LOCAL_EMBEDDING_MODEL}"""
     def _relink_thread(self, threshold: float):
         """Run linking in a thread."""
         try:
-            success = link_notes.run_linking_process(threshold)
+            success = linking.run_linking_process(threshold)
             if success:
                 print("Link recalculation complete.")
             else:

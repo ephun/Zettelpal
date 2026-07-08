@@ -1,23 +1,15 @@
-# zettelpal.py - Main Entry Point
-# Privacy-focused audio-to-Obsidian pipeline using local models only
+# pipeline.py - The full audio-to-Obsidian pipeline for one recording.
 
-import argparse
-import os
-import sys
 import datetime
+import json
+import os
 import re
 import shutil
-import json
+import sys
 
-import config
-import utils
-import transcribe
-import segment
-import create_notes
-import link_notes
-import classify
-import clip
-import vault_integrity
+from zettelpal import classify, clip, config, create_notes, segment, transcribe
+from zettelpal.vault import integrity as vault_integrity
+from zettelpal.vault import linking
 
 
 def ensure_directories():
@@ -98,7 +90,7 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
             with open(json_sidecar_path, "r", encoding="utf-8") as f:
                 whisper_segments = json.load(f)
             print(f"Loaded {len(whisper_segments)} Whisper timestamp segments.")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load timestamps: {e}")
 
     # === STEP 2: CLASSIFY ===
@@ -106,7 +98,7 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     try:
         with open(raw_transcript_path, "r", encoding="utf-8") as f:
             raw_transcript = f.read()
-    except Exception as e:
+    except OSError as e:
         print(f"ERROR: Could not read transcript: {e}")
         return False
 
@@ -131,7 +123,7 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
         with open(segmented_path, "w", encoding="utf-8") as f:
             json.dump(segmented_data, f, indent=2)
         print(f"Segments saved: {len(segmented_data)} segments")
-    except Exception as e:
+    except OSError as e:
         print(f"Warning: Could not save segments: {e}")
 
     # === STEP 3.5: EXTRACT AUDIO CLIPS ===
@@ -198,14 +190,14 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     # === STEP 6: SEMANTIC LINKING ===
     print("\n--- Step 6: Semantic Linking ---")
     try:
-        all_notes, _ = link_notes.update_and_load_vault_embeddings(
+        all_notes, _ = linking.update_and_load_vault_embeddings(
             os.path.abspath(config.OBSIDIAN_VAULT_ROOT),
             config.EMBEDDINGS_CACHE_FILE,
             notes_info
         )
 
         if all_notes:
-            link_notes.update_all_notes_links(
+            linking.update_all_notes_links(
                 all_notes,
                 config.SIMILARITY_THRESHOLD,
                 any_note_was_updated_or_created=True
@@ -223,14 +215,14 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     try:
         shutil.move(audio_filepath, archived_audio_path)
         print(f"Archived audio: {os.path.basename(archived_audio_path)}")
-    except Exception as e:
+    except (OSError, shutil.Error) as e:
         print(f"Warning: Could not archive audio: {e}")
 
     # Archive transcript
     try:
         shutil.move(raw_transcript_path, archived_transcript_path)
         print(f"Archived transcript: {os.path.basename(archived_transcript_path)}")
-    except Exception as e:
+    except (OSError, shutil.Error) as e:
         print(f"Warning: Could not archive transcript: {e}")
 
     # Archive timestamps JSON sidecar
@@ -241,7 +233,7 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
         try:
             shutil.move(json_sidecar_path, archived_json_path)
             print(f"Archived timestamps: {os.path.basename(archived_json_path)}")
-        except Exception as e:
+        except (OSError, shutil.Error) as e:
             print(f"Warning: Could not archive timestamps: {e}")
 
     # Cleanup segmented JSON
@@ -262,51 +254,5 @@ def _cleanup_file(filepath: str):
         if os.path.exists(filepath):
             os.remove(filepath)
             print(f"Cleaned up: {os.path.basename(filepath)}")
-    except Exception as e:
+    except OSError as e:
         print(f"Warning: Could not clean up {filepath}: {e}")
-
-
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Zettelpal - Privacy-focused audio to Obsidian notes"
-    )
-    parser.add_argument(
-        "audio_file",
-        nargs="?",
-        help="Audio file to process (launches GUI if not provided)"
-    )
-    parser.add_argument(
-        "--tags",
-        default="",
-        help="Comma-separated manual tags to add to notes"
-    )
-    parser.add_argument(
-        "--no-gui",
-        action="store_true",
-        help="Run in CLI mode only (requires audio_file)"
-    )
-    args = parser.parse_args()
-
-    ensure_directories()
-
-    if args.audio_file:
-        # CLI mode
-        if not os.path.exists(args.audio_file):
-            print(f"ERROR: File not found: {args.audio_file}")
-            sys.exit(1)
-        success = run_pipeline(args.audio_file, args.tags)
-        sys.exit(0 if success else 1)
-    elif args.no_gui:
-        print("ERROR: --no-gui requires an audio file argument.")
-        sys.exit(1)
-    else:
-        # GUI mode
-        import gui
-
-        app = gui.ZettelpalGUI()
-        app.mainloop()
-
-
-if __name__ == "__main__":
-    main()

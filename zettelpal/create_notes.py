@@ -1,28 +1,16 @@
 # create_notes.py - Create Obsidian Notes from Segmented Transcripts
 
-import os
-import re
 import datetime
-import config
-import utils
+import os
 
-
-def sanitize_filename(title: str) -> str:
-    """Convert a title to a filesystem-safe filename stem, preserving case."""
-    # Remove characters that are invalid in filenames, but keep letters, numbers, spaces, hyphens
-    s = re.sub(r'[<>:"/\\|?*]', '', title)
-    # Replace spaces with hyphens
-    s = s.replace(" ", "-")
-    # Collapse multiple hyphens
-    s = re.sub(r'-+', '-', s)
-    # Strip leading/trailing hyphens
-    s = s.strip("-")
-    return s[:100] if s else "Untitled"
+from zettelpal import config, llm, models
+from zettelpal.naming import sanitize_filename
+from zettelpal.vault import cache as vault_cache
 
 
 def generate_tags_for_content(content: str) -> list[str]:
     """
-    Uses the local LLM to generate semantic tags for content.
+    Uses the configured LLM to generate semantic tags for content.
     Returns a list of tags or empty list on failure.
     """
     if not content or not content.strip():
@@ -31,14 +19,14 @@ def generate_tags_for_content(content: str) -> list[str]:
     prompt = config.GRANULAR_TAGGING_PROMPT_TEMPLATE.format(text_content=content[:3000])
 
     print("[TAGGING] Generating semantic tags...")
-    response = utils.llm_chat(prompt, temperature=0.3, max_tokens=500)
+    response = llm.llm_chat(prompt, temperature=0.3, max_tokens=500)
 
     if not response:
         print("[TAGGING] No response from LLM")
         return []
 
     # Try to parse as JSON list
-    parsed = utils.extract_json_from_text(response)
+    parsed = llm.extract_json_from_text(response)
     if parsed and isinstance(parsed, list):
         # Filter to only valid string tags
         tags = [t for t in parsed if isinstance(t, str) and t.strip()]
@@ -222,20 +210,20 @@ def create_notes_from_segments(
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(full_note)
             print(f"[NOTE CREATED] {os.path.basename(filepath)}")
-        except Exception as e:
+        except OSError as e:
             print(f"[NOTE ERROR] Could not write {filepath}: {e}")
             continue
 
         # Generate embedding
         print(f"[EMBED] Generating embedding for: {os.path.basename(filepath)}")
-        embedding = utils.get_embedding(full_note)
+        embedding = models.get_embedding(full_note)
 
         if embedding is None:
             print(f"[EMBED WARNING] Embedding failed for: {filename}")
             continue
 
         # Update cache
-        utils.update_embedding_cache(filepath, embedding)
+        vault_cache.update_embedding_cache(filepath, embedding)
 
         created_notes_info.append({
             "filepath": filepath,
@@ -245,29 +233,3 @@ def create_notes_from_segments(
         })
 
     return created_notes_info
-
-
-if __name__ == "__main__":
-    import argparse
-    import json
-
-    parser = argparse.ArgumentParser(description="Create Obsidian notes from segmented JSON.")
-    parser.add_argument("segments_file", help="Path to the segmented JSON file.")
-    parser.add_argument("--recording-id", required=True, help="Recording ID (e.g., 11222501)")
-    parser.add_argument("--type", default="type/note", help="Type tag for notes")
-    parser.add_argument("--tags", default="", help="Comma-separated manual tags")
-    args = parser.parse_args()
-
-    with open(args.segments_file, 'r', encoding='utf-8') as f:
-        segments = json.load(f)
-
-    notes = create_notes_from_segments(
-        segments,
-        config.OBSIDIAN_VAULT_ROOT,
-        config.NOTES_SUBDIRECTORY_IN_VAULT,
-        args.recording_id,
-        args.type,
-        args.tags
-    )
-
-    print(f"\nCreated {len(notes)} notes.")

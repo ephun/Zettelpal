@@ -11,14 +11,14 @@ import sys
 # Your Obsidian vault root directory
 OBSIDIAN_VAULT_ROOT = "//PHUNRAID/ephunism"
 
-# Zettelpal working directory (for intermediate files) — the directory this
-# file lives in, so the app works regardless of where the repo is cloned.
-# In a frozen (PyInstaller) build, __file__ points at a temp extraction dir,
-# so use the executable's directory instead.
+# Zettelpal working directory (for intermediate files) — the repo root, one
+# level above this package, so the app works regardless of where the repo is
+# cloned. In a frozen (PyInstaller) build, __file__ points at a temp
+# extraction dir, so use the executable's directory instead.
 if getattr(sys, "frozen", False):
     ZETTELPAL_ROOT = os.path.dirname(sys.executable)
 else:
-    ZETTELPAL_ROOT = os.path.dirname(os.path.abspath(__file__))
+    ZETTELPAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Subdirectory within the vault where notes will be created (empty string = vault root)
 NOTES_SUBDIRECTORY_IN_VAULT = ""

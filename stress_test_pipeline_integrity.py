@@ -7,10 +7,9 @@ import wave
 
 import numpy as np
 
-import clip
-import config
-import link_notes
-import vault_integrity
+from zettelpal import clip, config
+from zettelpal.vault import integrity as vault_integrity
+from zettelpal.vault import linking as link_notes
 
 
 def write_note(vault, filename, title, source, created, body):

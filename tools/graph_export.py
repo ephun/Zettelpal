@@ -8,10 +8,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 
-# Assumes utils.py, config.py, and link_notes.py are in the same directory
-import utils
-import config
-import link_notes
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from zettelpal import config
+from zettelpal.vault import linking as link_notes
 
 def export_to_graphml(vault_root: str, similarity_threshold: float, chronological_weight: float, output_filepath: str):
     """

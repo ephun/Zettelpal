@@ -8,9 +8,10 @@ import datetime
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 
-# Assumes utils.py and config.py are in the same directory
-import utils
-import config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from zettelpal import config, models
+from zettelpal.vault import notes
 
 def find_near_duplicates(vault_root, similarity_threshold):
     """
@@ -30,7 +31,7 @@ def find_near_duplicates(vault_root, similarity_threshold):
     print(f"Using similarity threshold: {similarity_threshold}")
     
     # Use the same utility function from your pipeline to get all notes
-    all_md_files = utils.find_all_markdown_files(vault_root)
+    all_md_files = notes.find_all_markdown_files(vault_root)
 
     if len(all_md_files) < 2:
         print("Not enough notes to compare. Exiting.")
@@ -39,18 +40,18 @@ def find_near_duplicates(vault_root, similarity_threshold):
     notes_data = []
     print(f"Found {len(all_md_files)} notes. Generating embeddings...")
     
-    embedding_model = utils.load_embedding_model()
+    embedding_model = models.load_embedding_model()
     if embedding_model is None:
         print("Error: Embedding model could not be loaded. Cannot proceed.")
         return
     
     for i, filepath in enumerate(all_md_files):
         # Read file content and extract metadata
-        frontmatter, body_content, _ = utils.extract_frontmatter_and_body(filepath)
-        created_str = utils.extract_created_timestamp_str_from_frontmatter(frontmatter)
-        created_dt = utils.parse_created_timestamp_str(created_str) or datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
+        frontmatter, body_content, _ = notes.extract_frontmatter_and_body(filepath)
+        created_str = notes.extract_created_timestamp_str_from_frontmatter(frontmatter)
+        created_dt = notes.parse_created(created_str) or datetime.datetime.fromtimestamp(os.path.getmtime(filepath))
 
-        embedding = utils.get_embedding(body_content, embedding_model)
+        embedding = models.get_embedding(body_content, embedding_model)
         
         if embedding is not None:
             notes_data.append({

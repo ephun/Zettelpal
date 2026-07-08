@@ -1,2 +1,2 @@
 @echo off
-"%~dp0.venv\Scripts\python.exe" "%~dp0zettelpal.py" %*
+"%~dp0.venv\Scripts\python.exe" -m zettelpal %*

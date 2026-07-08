@@ -1,9 +1,9 @@
-# segment.py - Transcript Segmentation using Local LLM
+# segment.py - Transcript Segmentation via the configured LLM backend
 
 import difflib
 import time
-import config
-import utils
+
+from zettelpal import config, llm
 
 
 def chunk_transcript(text: str, max_chars: int = 4000) -> list[str]:
@@ -157,7 +157,7 @@ def align_segments_to_timestamps(
 
 def segment_transcript(transcript: str, whisper_segments: list[dict] = None) -> list[dict] | None:
     """
-    Uses the local LLM to segment a transcript into titled segments.
+    Uses the configured LLM to segment a transcript into titled segments.
 
     Args:
         transcript: The raw transcript text.
@@ -181,7 +181,7 @@ def segment_transcript(transcript: str, whisper_segments: list[dict] = None) -> 
 
         prompt = config.SEGMENTATION_PROMPT_TEMPLATE.format(transcript_chunk=chunk)
 
-        llm_response = utils.llm_chat(
+        llm_response = llm.llm_chat(
             prompt,
             temperature=config.SEGMENTATION_LLM_TEMPERATURE,
             max_tokens=config.SEGMENTATION_MAX_TOKENS
@@ -191,7 +191,7 @@ def segment_transcript(transcript: str, whisper_segments: list[dict] = None) -> 
             print(f"[SEGMENTER ERROR] LLM did not return a response for chunk {i + 1}.")
             return None
 
-        parsed = utils.extract_json_from_text(llm_response)
+        parsed = llm.extract_json_from_text(llm_response)
         if parsed is None:
             print(f"[SEGMENTER ERROR] Failed to parse JSON for chunk {i + 1}:")
             print(llm_response[:500] + "..." if len(llm_response) > 500 else llm_response)
@@ -228,33 +228,3 @@ def segment_transcript(transcript: str, whisper_segments: list[dict] = None) -> 
         print(f"[SEGMENTER] Aligned {aligned}/{len(all_segments)} segments to timestamps.")
 
     return all_segments if all_segments else None
-
-
-# Legacy alias for backward compatibility
-segment_and_title_transcript_local = segment_transcript
-segment_and_title_transcript_gemini = segment_transcript
-
-
-if __name__ == "__main__":
-    import argparse
-    import json
-
-    parser = argparse.ArgumentParser(description="Segment a transcript using local LLM.")
-    parser.add_argument("input_file", help="Path to the transcript text file.")
-    parser.add_argument("-o", "--output", help="Output JSON file (optional)")
-    args = parser.parse_args()
-
-    with open(args.input_file, 'r', encoding='utf-8') as f:
-        transcript = f.read()
-
-    segments = segment_transcript(transcript)
-
-    if segments:
-        if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
-                json.dump(segments, f, indent=2)
-            print(f"Segments saved to {args.output}")
-        else:
-            print(json.dumps(segments, indent=2))
-    else:
-        print("Segmentation failed.")

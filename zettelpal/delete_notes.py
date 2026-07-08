@@ -1,11 +1,11 @@
 # delete_notes.py - Delete Obsidian Notes by Recording ID
 
+import argparse
 import os
 import re
 import sys
-import argparse
 
-import config
+from zettelpal import config
 
 
 def find_notes_by_recording(vault_path: str, recording_id: str) -> list[str]:
@@ -27,7 +27,7 @@ def find_notes_by_recording(vault_path: str, recording_id: str) -> list[str]:
                             value = match.group(1).strip().strip('"').strip("'")
                             if recording_id in value:
                                 files_to_delete.append(filepath)
-                except Exception as e:
+                except OSError as e:
                     print(f"Warning: Could not read {filepath}: {e}")
 
     return files_to_delete

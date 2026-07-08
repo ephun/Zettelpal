@@ -1,14 +1,15 @@
-# link_notes.py - Semantic and Chronological Note Linking
+# linking.py - Semantic and Chronological Note Linking
 
 import json
 import os
-import re
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 
-import utils
-import config
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+from zettelpal import config, models
+from zettelpal.vault import cache as vault_cache
+from zettelpal.vault import notes
 
 
 def update_and_load_vault_embeddings(
@@ -23,7 +24,7 @@ def update_and_load_vault_embeddings(
         tuple: (list of valid notes with embeddings, whether any updates occurred)
     """
     print(f"Loading vault embeddings from: {cache_filepath}")
-    cache = utils.load_embedding_cache()
+    cache = vault_cache.load_embedding_cache()
     updated_cache = cache.copy()
     update_needed = False
 
@@ -31,7 +32,7 @@ def update_and_load_vault_embeddings(
     any_updates = bool(new_note_paths)
 
     print(f"Scanning vault: {vault_root}")
-    all_md_files = utils.find_all_markdown_files(vault_root)
+    all_md_files = notes.find_all_markdown_files(vault_root)
     found_relative_paths = {os.path.relpath(f, vault_root) for f in all_md_files}
 
     print(f"Found {len(all_md_files)} markdown files.")
@@ -44,11 +45,11 @@ def update_and_load_vault_embeddings(
         # Handle newly created notes
         if filepath in new_note_paths:
             new_note = next(n for n in new_notes_info if n["filepath"] == filepath)
-            frontmatter, body, _ = utils.extract_frontmatter_and_body(filepath)
+            frontmatter, body, _ = notes.extract_frontmatter_and_body(filepath)
 
-            source = utils.extract_source_from_frontmatter(frontmatter)
-            created_str = utils.extract_created_timestamp_str_from_frontmatter(frontmatter)
-            created_dt = utils.parse_created_timestamp_str(created_str)
+            source = notes.extract_source_from_frontmatter(frontmatter)
+            created_str = notes.extract_created_timestamp_str_from_frontmatter(frontmatter)
+            created_dt = notes.parse_created(created_str)
 
             embedding = np.array(new_note["embedding"])
 
@@ -81,13 +82,13 @@ def update_and_load_vault_embeddings(
                 update_needed = True
             continue
 
-        frontmatter, body, _ = utils.extract_frontmatter_and_body(filepath)
+        frontmatter, body, _ = notes.extract_frontmatter_and_body(filepath)
 
         filename_stem = os.path.splitext(os.path.basename(filepath))[0]
-        title = utils.extract_title_from_filepath(filepath)
-        source = utils.extract_source_from_frontmatter(frontmatter)
-        created_str = utils.extract_created_timestamp_str_from_frontmatter(frontmatter)
-        created_dt = utils.parse_created_timestamp_str(created_str)
+        title = notes.extract_title_from_filepath(filepath)
+        source = notes.extract_source_from_frontmatter(frontmatter)
+        created_str = notes.extract_created_timestamp_str_from_frontmatter(frontmatter)
+        created_dt = notes.parse_created(created_str)
 
         cache_entry = cache.get(relative_path)
         is_cached = cache_entry is not None
@@ -105,16 +106,16 @@ def update_and_load_vault_embeddings(
             if cached_emb is not None:
                 try:
                     embedding = np.array(cached_emb)
-                except:
+                except (TypeError, ValueError):
                     should_recalc = True
 
         if should_recalc:
             update_needed = True
             any_updates = True
 
-            model = utils.load_embedding_model()
+            model = models.load_embedding_model()
             if model is not None and body and body.strip():
-                embedding = utils.get_embedding(body, model)
+                embedding = models.get_embedding(body, model)
 
             updated_cache[relative_path] = {
                 "display_title": title,
@@ -144,8 +145,8 @@ def update_and_load_vault_embeddings(
 
     # Save cache if changed
     if update_needed:
-        print(f"Saving updated cache...")
-        utils.save_embedding_cache(updated_cache)
+        print("Saving updated cache...")
+        vault_cache.save_embedding_cache(updated_cache)
     else:
         print("Cache is up-to-date.")
 
@@ -228,7 +229,7 @@ def update_all_notes_links(
     for note in notes_to_update:
         filepath = note["filepath"]
 
-        frontmatter, body, _ = utils.extract_frontmatter_and_body(filepath)
+        frontmatter, body, _ = notes.extract_frontmatter_and_body(filepath)
 
         # Build fixed content (frontmatter + body)
         parts = []
@@ -353,7 +354,7 @@ def update_all_notes_links(
 
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(final)
-        except Exception as e:
+        except OSError as e:
             print(f"Error writing {os.path.basename(filepath)}: {e}")
 
 
@@ -377,7 +378,7 @@ def run_linking_process(threshold: float, new_notes_info: list[dict] = None) -> 
             try:
                 with open(threshold_file, "r") as f:
                     last_threshold = json.load(f).get("threshold")
-            except:
+            except (OSError, json.JSONDecodeError):
                 pass
 
         # Update cache and load embeddings
@@ -403,7 +404,7 @@ def run_linking_process(threshold: float, new_notes_info: list[dict] = None) -> 
         try:
             with open(threshold_file, "w", encoding="utf-8") as f:
                 json.dump({"threshold": threshold}, f)
-        except Exception as e:
+        except OSError as e:
             print(f"Warning: Could not save threshold: {e}")
 
         print("--- Linking Complete ---")
@@ -414,18 +415,3 @@ def run_linking_process(threshold: float, new_notes_info: list[dict] = None) -> 
         import traceback
         traceback.print_exc()
         return False
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Update semantic links in Obsidian notes.")
-    parser.add_argument(
-        "--threshold", type=float, default=config.SIMILARITY_THRESHOLD,
-        help=f"Similarity threshold (default: {config.SIMILARITY_THRESHOLD})"
-    )
-    args = parser.parse_args()
-
-    import sys
-    success = run_linking_process(args.threshold)
-    sys.exit(0 if success else 1)

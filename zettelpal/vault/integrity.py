@@ -1,184 +1,32 @@
+# integrity.py - Vault integrity: duplicate quarantine and source validation.
+
 import datetime
 import difflib
 import hashlib
 import json
 import os
-import re
 import shutil
 from collections import defaultdict
 
-import numpy as np
-
-import config
-
-
-FRONTMATTER_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)\s*$")
-WIKILINK_RE = re.compile(r"\[\[(.*?)\]\]")
-LEGACY_LINK_LINE_RE = re.compile(r"^\s*(\[\[.*?\]\]\s*[,;-]?\s*)+$")
+from zettelpal import config
+from zettelpal.vault import cache as vault_cache
+from zettelpal.vault.notes import read_note
 
 
-def canonical_dir(path):
+def canonical_dir(path: str) -> str:
     path = os.path.normpath(path)
     if not path.endswith(os.sep):
         path += os.sep
     return os.path.abspath(path)
 
 
-def is_relative_to(child_path, parent_dir):
+def is_relative_to(child_path: str, parent_dir: str) -> bool:
     child = os.path.normcase(os.path.abspath(child_path))
     parent = os.path.normcase(canonical_dir(parent_dir))
     return child.startswith(parent)
 
 
-def clean_scalar(value):
-    return str(value).strip().strip('"').strip("'")
-
-
-def parse_created(value):
-    if not value:
-        return None
-    try:
-        return datetime.datetime.fromisoformat(clean_scalar(value))
-    except ValueError:
-        return None
-
-
-def normalize_body(text):
-    text = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def extract_wikilink_targets(text):
-    targets = []
-    for match in WIKILINK_RE.findall(text):
-        target = re.split(r"[#|]", match, maxsplit=1)[0].strip()
-        if target:
-            targets.append(target)
-    return targets
-
-
-def _split_frontmatter(lines):
-    if not lines or lines[0].strip() != "---":
-        return {}, 0, "missing_frontmatter"
-
-    frontmatter = {}
-    current_list_key = None
-    for index in range(1, len(lines)):
-        line = lines[index]
-        if line.strip() == "---":
-            return frontmatter, index + 1, None
-
-        match = FRONTMATTER_KEY_RE.match(line)
-        if match:
-            key, value = match.group(1), match.group(2).strip()
-            current_list_key = key if value == "" else None
-            frontmatter[key] = [] if value == "" else clean_scalar(value)
-            continue
-
-        if current_list_key and line.lstrip().startswith("- "):
-            frontmatter[current_list_key].append(clean_scalar(line.lstrip()[2:]))
-
-    return frontmatter, len(lines), "unterminated_frontmatter"
-
-
-def _split_body_and_generated_links(content_lines):
-    block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
-    block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
-
-    marker_start = -1
-    marker_end = -1
-    for index, line in enumerate(content_lines):
-        stripped = line.strip()
-        if stripped == block_start:
-            marker_start = index
-        elif marker_start != -1 and stripped == block_end:
-            marker_end = index
-            break
-
-    if marker_start != -1 and marker_end != -1:
-        return (
-            "".join(content_lines[:marker_start]).strip(),
-            content_lines[marker_start : marker_end + 1],
-            True,
-        )
-
-    link_start = -1
-    for index, line in enumerate(content_lines):
-        if line.strip() and LEGACY_LINK_LINE_RE.match(line.strip()):
-            link_start = index
-            break
-
-    if link_start != -1:
-        return (
-            "".join(content_lines[:link_start]).strip(),
-            content_lines[link_start:],
-            False,
-        )
-
-    return "".join(content_lines).strip(), [], False
-
-
-def read_note(filepath, vault_root):
-    with open(filepath, "r", encoding="utf-8", errors="replace") as file:
-        lines = file.readlines()
-
-    frontmatter, body_start, frontmatter_error = _split_frontmatter(lines)
-    body, generated_link_lines, has_link_markers = _split_body_and_generated_links(
-        lines[body_start:]
-    )
-    tags = frontmatter.get("tags") or []
-    if isinstance(tags, str):
-        tags = [tags]
-
-    relpath = os.path.relpath(filepath, vault_root).replace("\\", "/")
-    stem = os.path.splitext(os.path.basename(filepath))[0]
-    return {
-        "path": filepath,
-        "relpath": relpath,
-        "stem": stem,
-        "frontmatter": frontmatter,
-        "frontmatter_error": frontmatter_error,
-        "source": frontmatter.get("source"),
-        "created": parse_created(frontmatter.get("created") or frontmatter.get("date")),
-        "body": body,
-        "body_norm": normalize_body(body),
-        "body_len": len(body.strip()),
-        "generated_links": extract_wikilink_targets("".join(generated_link_lines)),
-        "has_link_markers": has_link_markers,
-        "tags": tags,
-    }
-
-
-def _load_embedding_cache():
-    if not os.path.exists(config.EMBEDDINGS_CACHE_FILE):
-        return {}
-    try:
-        with open(config.EMBEDDINGS_CACHE_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_embedding_cache(cache):
-    os.makedirs(os.path.dirname(config.EMBEDDINGS_CACHE_FILE), exist_ok=True)
-    with open(config.EMBEDDINGS_CACHE_FILE, "w", encoding="utf-8") as file:
-        json.dump(cache, file, indent=2)
-
-
-def _embedding_for_note(note, cache):
-    entry = cache.get(note["relpath"]) or cache.get(note["relpath"].replace("/", "\\"))
-    if not isinstance(entry, dict) or not isinstance(entry.get("embedding"), list):
-        return None
-
-    embedding = np.asarray(entry["embedding"], dtype=np.float32)
-    norm = np.linalg.norm(embedding)
-    if norm <= 0:
-        return None
-    return embedding / norm
-
-
-def _iter_source_notes(vault_root, recording_id):
+def _iter_source_notes(vault_root: str, recording_id: str) -> list[dict]:
     notes = []
     for root, _, files in os.walk(vault_root):
         if os.path.basename(root) == ".obsidian":
@@ -210,7 +58,7 @@ class _DisjointSet:
             self.parents[right_root] = left_root
 
 
-def text_duplicate_score(left, right):
+def text_duplicate_score(left: str, right: str) -> float:
     if not left or not right:
         return 0.0
 
@@ -229,10 +77,10 @@ def text_duplicate_score(left, right):
 
 
 def quarantine_duplicate_notes_for_source(
-    vault_root,
-    recording_id,
-    text_similarity_threshold=0.90,
-):
+    vault_root: str,
+    recording_id: str,
+    text_similarity_threshold: float = 0.90,
+) -> list[dict]:
     """Move later duplicate notes for a recording into a quarantine folder."""
     vault_root = canonical_dir(vault_root)
     source_notes = _iter_source_notes(vault_root, recording_id)
@@ -277,7 +125,7 @@ def quarantine_duplicate_notes_for_source(
     if not to_quarantine:
         return []
 
-    cache = _load_embedding_cache()
+    cache = vault_cache.load_embedding_cache()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     quarantine_root = os.path.join(
         config.ZETTELPAL_ROOT,
@@ -309,7 +157,7 @@ def quarantine_duplicate_notes_for_source(
             }
         )
 
-    _save_embedding_cache(cache)
+    vault_cache.save_embedding_cache(cache)
     manifest_path = os.path.join(quarantine_root, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as file:
         json.dump(
@@ -325,7 +173,7 @@ def quarantine_duplicate_notes_for_source(
     return moved
 
 
-def validate_source_integrity(vault_root, recording_id):
+def validate_source_integrity(vault_root: str, recording_id: str) -> list[tuple[str, str]]:
     """Return source-scoped integrity issues without modifying the vault."""
     vault_root = canonical_dir(vault_root)
     source_notes = _iter_source_notes(vault_root, recording_id)

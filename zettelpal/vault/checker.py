@@ -1,25 +1,16 @@
+# checker.py - Read-only full-vault integrity linter with JSON report.
+
 import argparse
 import datetime
 import hashlib
 import json
 import os
-import re
 import sys
 import time
 from collections import Counter, defaultdict
 
-import config
-
-
-WIKILINK_RE = re.compile(r"\[\[(.*?)\]\]")
-FRONTMATTER_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)\s*$")
-LEGACY_LINK_LINE_RE = re.compile(r"^\s*(\[\[.*?\]\]\s*[,;-]?\s*)+$")
-DEFAULT_EXCLUDED_DIRS = {
-    ".git",
-    ".obsidian",
-    ".trash",
-    "zettelpal_quarantine",
-}
+from zettelpal import config
+from zettelpal.vault.notes import read_note
 
 
 def stamp():
@@ -28,154 +19,6 @@ def stamp():
 
 def log(message):
     print(f"[{stamp()}] {message}", flush=True)
-
-
-def clean_scalar(value):
-    return str(value).strip().strip('"').strip("'")
-
-
-def parse_created(value):
-    if not value:
-        return None
-
-    value = clean_scalar(value)
-    try:
-        return datetime.datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def normalize_body(text):
-    text = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def extract_wikilink_targets(text):
-    targets = []
-    for match in WIKILINK_RE.findall(text):
-        target = re.split(r"[#|]", match, maxsplit=1)[0].strip()
-        if target:
-            targets.append(target)
-    return targets
-
-
-def split_frontmatter(lines):
-    if not lines or lines[0].strip() != "---":
-        return None, 0, "missing_frontmatter"
-
-    frontmatter = {}
-    current_list_key = None
-    for index in range(1, len(lines)):
-        line = lines[index]
-        if line.strip() == "---":
-            return frontmatter, index + 1, None
-
-        key_match = FRONTMATTER_KEY_RE.match(line)
-        if key_match:
-            key, value = key_match.group(1), key_match.group(2).strip()
-            current_list_key = key if value == "" else None
-            frontmatter[key] = [] if value == "" else clean_scalar(value)
-            continue
-
-        if current_list_key and line.lstrip().startswith("- "):
-            frontmatter[current_list_key].append(clean_scalar(line.lstrip()[2:]))
-
-    return frontmatter, len(lines), "unterminated_frontmatter"
-
-
-def split_body_and_generated_links(content_lines):
-    block_start = getattr(config, "LINK_BLOCK_START", "<!-- zettelpal-links:start -->")
-    block_end = getattr(config, "LINK_BLOCK_END", "<!-- zettelpal-links:end -->")
-
-    start_index = -1
-    end_index = -1
-    for index, line in enumerate(content_lines):
-        stripped = line.strip()
-        if stripped == block_start:
-            start_index = index
-        elif start_index != -1 and stripped == block_end:
-            end_index = index
-            break
-
-    if start_index != -1 and end_index != -1:
-        return (
-            "".join(content_lines[:start_index]).strip(),
-            content_lines[start_index : end_index + 1],
-            True,
-        )
-
-    link_start = -1
-    for index, line in enumerate(content_lines):
-        if line.strip() and LEGACY_LINK_LINE_RE.match(line.strip()):
-            link_start = index
-            break
-
-    if link_start != -1:
-        return (
-            "".join(content_lines[:link_start]).strip(),
-            content_lines[link_start:],
-            False,
-        )
-
-    return "".join(content_lines).strip(), [], False
-
-
-def read_note(filepath, vault_root):
-    with open(filepath, "r", encoding="utf-8", errors="replace") as file:
-        lines = file.readlines()
-
-    frontmatter, body_start, frontmatter_error = split_frontmatter(lines)
-    content_lines = lines[body_start:]
-    body, generated_link_lines, has_link_markers = split_body_and_generated_links(
-        content_lines
-    )
-
-    relpath = os.path.relpath(filepath, vault_root).replace("\\", "/")
-    filename = os.path.basename(filepath)
-    stem = os.path.splitext(filename)[0]
-    tags = []
-    if isinstance(frontmatter, dict):
-        raw_tags = frontmatter.get("tags") or []
-        tags = raw_tags if isinstance(raw_tags, list) else [raw_tags]
-
-    source = frontmatter.get("source") if isinstance(frontmatter, dict) else None
-    is_zettelpal = bool(source) or "zettelpal" in tags
-    title = None
-    if isinstance(frontmatter, dict):
-        title = frontmatter.get("title")
-    if not title:
-        h1_match = re.search(r"^\s*#\s+(.+?)\s*$", body, re.MULTILINE)
-        title = h1_match.group(1).strip() if h1_match else stem
-
-    generated_text = "".join(generated_link_lines)
-    return {
-        "path": filepath,
-        "relpath": relpath,
-        "filename": filename,
-        "stem": stem,
-        "frontmatter": frontmatter or {},
-        "frontmatter_error": frontmatter_error,
-        "body": body,
-        "body_norm": normalize_body(body),
-        "body_len": len(body.strip()),
-        "generated_links": extract_wikilink_targets(generated_text),
-        "all_links": extract_wikilink_targets("".join(lines)),
-        "has_link_markers": has_link_markers,
-        "source": source,
-        "created": parse_created(
-            frontmatter.get("created") or frontmatter.get("date")
-            if isinstance(frontmatter, dict)
-            else None
-        ),
-        "created_raw": (
-            frontmatter.get("created") or frontmatter.get("date")
-            if isinstance(frontmatter, dict)
-            else None
-        ),
-        "title": title,
-        "tags": tags,
-        "is_zettelpal": is_zettelpal,
-    }
 
 
 def add_issue(issues, severity, code, relpath, detail):
@@ -214,7 +57,7 @@ def main():
     log(f"Scanning vault: {vault_root}")
 
     notes = []
-    excluded_dirs = set(getattr(config, "EXCLUDED_VAULT_DIRS", DEFAULT_EXCLUDED_DIRS))
+    excluded_dirs = set(getattr(config, "EXCLUDED_VAULT_DIRS", {".git", ".obsidian", ".trash", "zettelpal_quarantine"}))
     for root, dirs, files in os.walk(vault_root):
         dirs[:] = [
             dirname for dirname in dirs

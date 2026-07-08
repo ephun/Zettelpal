@@ -8,11 +8,11 @@ block_cipher = None
 spec_dir = os.path.dirname(os.path.abspath(SPEC))
 
 a = Analysis(
-    ['zettelpal.py'],
+    ['launcher.py'],
     pathex=[spec_dir],
     binaries=[],
     datas=[
-        ('zettelpal.ico', '.'),
+        ('zettelpal/zettelpal.ico', 'zettelpal'),
     ],
     hiddenimports=[
         'whisper',
@@ -65,5 +65,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='zettelpal.ico',
+    icon='zettelpal/zettelpal.ico',
 )

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zettelpal"
-version = "2.0.0"
+version = "2.1.0"
 description = "Privacy-focused audio-to-Obsidian notes pipeline using local models"
 readme = "README.md"
 license = {text = "MIT"}
@@ -51,30 +51,19 @@ dev = [
 ]
 
 [project.scripts]
-zettelpal = "zettelpal:main"
+zettelpal = "zettelpal.cli:main"
+zettelpal-delete = "zettelpal.delete_notes:main"
+zettelpal-check = "zettelpal.vault.checker:main"
 
 [project.gui-scripts]
-zettelpal-gui = "gui:main"
+zettelpal-gui = "zettelpal.gui:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/zettelpal"
-Repository = "https://github.com/yourusername/zettelpal"
+Homepage = "https://github.com/ephun/Zettelpal"
+Repository = "https://github.com/ephun/Zettelpal"
 
 [tool.setuptools]
-py-modules = [
-    "zettelpal",
-    "config",
-    "utils",
-    "vault_integrity",
-    "transcribe",
-    "segment",
-    "classify",
-    "create_notes",
-    "link_notes",
-    "delete_notes",
-    "clip",
-    "gui",
-]
+packages = ["zettelpal", "zettelpal.vault"]
 
 [tool.setuptools.package-data]
-"*" = ["*.ico"]
+zettelpal = ["*.ico"]
