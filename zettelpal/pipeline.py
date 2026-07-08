@@ -214,6 +214,10 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
     # === STEP 7: ARCHIVE & CLEANUP ===
     log.info("\n--- Step 7: Archive & Cleanup ---")
 
+    # Ensure the archive destination exists so a direct run_pipeline() call
+    # doesn't strand the audio when ensure_directories() wasn't run first.
+    os.makedirs(config.settings.resolved_archive_dir, exist_ok=True)
+
     # Archive audio
     try:
         shutil.move(audio_filepath, archived_audio_path)

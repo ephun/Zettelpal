@@ -51,6 +51,9 @@ dev = [
     "pytest>=7.0.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [project.scripts]
 zettelpal = "zettelpal.cli:main"
 zettelpal-delete = "zettelpal.delete_notes:main"
