@@ -32,28 +32,13 @@ def add_issue(issues, severity, code, relpath, detail):
     )
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Read-only integrity checker for the Zettelpal Obsidian vault."
-    )
-    parser.add_argument(
-        "--vault",
-        default=config.settings.vault_root,
-        help="Vault root to scan.",
-    )
-    parser.add_argument(
-        "--json",
-        default="vault_integrity_report.json",
-        help="Path for the full JSON report.",
-    )
-    parser.add_argument(
-        "--fail-on-warning",
-        action="store_true",
-        help="Exit non-zero for warnings as well as errors.",
-    )
-    args = parser.parse_args()
-
-    vault_root = os.path.abspath(args.vault)
+def run_check(
+    vault_root: str,
+    json_path: str = "vault_integrity_report.json",
+    fail_on_warning: bool = False,
+) -> int:
+    """Scan the vault, write the JSON report, and return an exit code."""
+    vault_root = os.path.abspath(vault_root)
     log(f"Scanning vault: {vault_root}")
 
     notes = []
@@ -223,7 +208,7 @@ def main():
         "issues": issues,
     }
 
-    with open(args.json, "w", encoding="utf-8") as file:
+    with open(json_path, "w", encoding="utf-8") as file:
         json.dump(report, file, indent=2)
 
     log(f"Scanned notes: {report['scanned_notes']}")
@@ -231,13 +216,36 @@ def main():
     log(f"Sources: {report['source_count']}")
     log(f"Issues by severity: {dict(severity_counts)}")
     log(f"Issues by code: {dict(counts)}")
-    log(f"Wrote report: {os.path.abspath(args.json)}")
+    log(f"Wrote report: {os.path.abspath(json_path)}")
 
     if severity_counts.get("error", 0) > 0:
         return 1
-    if args.fail_on_warning and severity_counts.get("warning", 0) > 0:
+    if fail_on_warning and severity_counts.get("warning", 0) > 0:
         return 1
     return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Read-only integrity checker for the Zettelpal Obsidian vault."
+    )
+    parser.add_argument(
+        "--vault",
+        default=config.settings.vault_root,
+        help="Vault root to scan.",
+    )
+    parser.add_argument(
+        "--json",
+        default="vault_integrity_report.json",
+        help="Path for the full JSON report.",
+    )
+    parser.add_argument(
+        "--fail-on-warning",
+        action="store_true",
+        help="Exit non-zero for warnings as well as errors.",
+    )
+    args = parser.parse_args()
+    return run_check(args.vault, args.json, args.fail_on_warning)
 
 
 if __name__ == "__main__":

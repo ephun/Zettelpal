@@ -131,7 +131,7 @@ def split_body_and_generated_links(content_lines: list[str]) -> tuple[str, list[
 
 def read_note(filepath: str, vault_root: str) -> dict:
     """Reads a note into a structured dict (see keys below)."""
-    with open(filepath, "r", encoding="utf-8", errors="replace") as file:
+    with open(filepath, "r", encoding="utf-8-sig", errors="replace") as file:
         lines = file.readlines()
 
     frontmatter, body_start, frontmatter_error = split_frontmatter(lines)
@@ -225,7 +225,7 @@ def extract_frontmatter_and_body(filepath: str) -> tuple[list[str], str, list[st
         tuple: (frontmatter_lines, body_content_string, link_lines_list)
     """
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, 'r', encoding='utf-8-sig') as f:
             all_lines = f.readlines()
     except OSError as e:
         log.error(f"Error reading file {filepath}: {e}")
