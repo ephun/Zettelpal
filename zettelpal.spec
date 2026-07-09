@@ -4,8 +4,14 @@
 
 import os
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 spec_dir = os.path.dirname(os.path.abspath(SPEC))
+
+# CustomTkinter ships its theme/asset JSON files as package data that must be
+# bundled or the GUI fails to start in the frozen build.
+ctk_datas = collect_data_files('customtkinter')
 
 a = Analysis(
     ['launcher.py'],
@@ -13,7 +19,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('zettelpal/zettelpal.ico', 'zettelpal'),
-    ],
+    ] + ctk_datas,
     hiddenimports=[
         'whisper',
         'sentence_transformers',
@@ -26,6 +32,7 @@ a = Analysis(
         'typer',
         'pydantic',
         'pydantic_settings',
+        'customtkinter',
         'tkinter',
         'tkinter.ttk',
         'tkinter.filedialog',
