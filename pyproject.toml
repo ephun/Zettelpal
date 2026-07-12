@@ -68,7 +68,7 @@ Homepage = "https://github.com/ephun/Zettelpal"
 Repository = "https://github.com/ephun/Zettelpal"
 
 [tool.setuptools]
-packages = ["zettelpal", "zettelpal.vault"]
+packages = ["zettelpal", "zettelpal.vault", "zettelpal.insights"]
 
 [tool.setuptools.package-data]
 zettelpal = ["*.ico"]

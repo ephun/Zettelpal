@@ -100,6 +100,7 @@ class ZettelpalGUI(ctk.CTk):
         self.audio_files: list[str] = []
         self.processing_queue: queue.Queue = queue.Queue()
         self.processing_thread: threading.Thread | None = None
+        self.insights_thread: threading.Thread | None = None
         self.threshold_var = ctk.DoubleVar(value=config.settings.similarity_threshold)
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
         self._setting_vars: dict[str, ctk.Variable] = {}
@@ -109,6 +110,7 @@ class ZettelpalGUI(ctk.CTk):
 
         self._build_sidebar()
         self._build_pipeline_view()
+        self._build_insights_view()
         self._build_settings_view()
         self._attach_logging()
         self.show_view("pipeline")
@@ -151,7 +153,8 @@ class ZettelpalGUI(ctk.CTk):
 
         nav = ctk.CTkFrame(bar, fg_color="transparent")
         nav.grid(row=2, column=0, sticky="ew", padx=12)
-        for i, (key, label) in enumerate((("pipeline", "  Pipeline"), ("settings", "  Settings"))):
+        nav_items = (("pipeline", "  Pipeline"), ("insights", "  Insights"), ("settings", "  Settings"))
+        for i, (key, label) in enumerate(nav_items):
             btn = ctk.CTkButton(
                 nav, text=label, anchor="w", height=40, corner_radius=8,
                 fg_color="transparent", text_color=TEXT, hover_color=FIELD_HOVER,
@@ -227,6 +230,161 @@ class ZettelpalGUI(ctk.CTk):
         self.start_button.grid(row=0, column=0, sticky="ew")
         self._secondary_button(controls, "Clear log", self.clear_console, width=110).grid(
             row=0, column=1, padx=(12, 0))
+
+    # -- insights view ---------------------------------------------------
+
+    def _build_insights_view(self):
+        view = ctk.CTkFrame(self, fg_color="transparent")
+        view.grid(row=0, column=1, sticky="nsew", padx=28, pady=24)
+        view.grid_columnconfigure(0, weight=1)
+        view.grid_rowconfigure(1, weight=1)
+        self.insights_view = view
+        self.insight_buttons: list[ctk.CTkButton] = []
+
+        ctk.CTkLabel(view, text="Insights", anchor="w", text_color=TEXT,
+                     font=ctk.CTkFont(size=26, weight="bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 16))
+
+        # Ask-yourself card
+        ask_card = self._card(view)
+        ask_card.grid(row=1, column=0, sticky="nsew")
+        ask_card.grid_columnconfigure(0, weight=1)
+        ask_card.grid_rowconfigure(2, weight=1)
+        self._section_label(ask_card, "ASK YOURSELF").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(14, 6))
+
+        ask_row = ctk.CTkFrame(ask_card, fg_color="transparent")
+        ask_row.grid(row=1, column=0, sticky="ew", padx=14)
+        ask_row.grid_columnconfigure(0, weight=1)
+        self.ask_entry = self._make_entry(ask_row, "")
+        self.ask_entry.grid(row=0, column=0, sticky="ew")
+        self.ask_entry.bind("<Return>", lambda _e: self.ask_question())
+        self.ask_button = ctk.CTkButton(
+            ask_row, text="Ask", width=90, height=34, corner_radius=8,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, command=self.ask_question)
+        self.ask_button.grid(row=0, column=1, padx=(8, 0))
+        self.insight_buttons.append(self.ask_button)
+
+        self.answer_box = ctk.CTkTextbox(
+            ask_card, state="disabled", wrap="word", fg_color=FIELD_BG,
+            corner_radius=8, font=ctk.CTkFont(size=13))
+        self.answer_box.grid(row=2, column=0, sticky="nsew", padx=14, pady=(10, 14))
+        self._set_answer("Ask a question and it's answered from your own notes, "
+                         "with the notes it drew on listed underneath.")
+
+        # Generate card
+        gen_card = self._card(view)
+        gen_card.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+        gen_card.grid_columnconfigure(0, weight=1)
+        self._section_label(gen_card, "GENERATE").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(14, 4))
+        ctk.CTkLabel(gen_card,
+                     text=f"Written to your vault's “{config.settings.insights_subdirectory}” "
+                          "folder — kept apart from your own notes.",
+                     text_color=MUTED, anchor="w", font=ctk.CTkFont(size=12)).grid(
+            row=1, column=0, sticky="w", padx=18, pady=(0, 8))
+
+        btn_row = ctk.CTkFrame(gen_card, fg_color="transparent")
+        btn_row.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 8))
+        for text, command in (("Themes", self.gen_themes),
+                              ("Weekly digest", self.gen_digest),
+                              ("Resurface", self.gen_resurface)):
+            btn = self._secondary_button(btn_row, text, command, width=150)
+            btn.pack(side="left", padx=(0, 8))
+            self.insight_buttons.append(btn)
+
+        self.insight_status = ctk.CTkLabel(gen_card, text="", text_color=MUTED,
+                                           font=ctk.CTkFont(size=12), anchor="w")
+        self.insight_status.grid(row=3, column=0, sticky="w", padx=18, pady=(0, 14))
+
+    def _set_answer(self, text: str):
+        self.answer_box.configure(state="normal")
+        self.answer_box.delete("1.0", "end")
+        self.answer_box.insert("1.0", text)
+        self.answer_box.configure(state="disabled")
+
+    def _insight_status(self, text: str, kind: str = "info"):
+        colors = {
+            "info": MUTED,
+            "ok": ("#15803d", "#4ade80"),
+            "warn": ("#b45309", "#fbbf24"),
+            "error": ("#b91c1c", "#f87171"),
+        }
+        self.insight_status.configure(text=text, text_color=colors.get(kind, MUTED))
+
+    def _set_insights_busy(self, busy: bool):
+        for btn in self.insight_buttons:
+            btn.configure(state="disabled" if busy else "normal")
+
+    def ask_question(self):
+        question = self.ask_entry.get().strip()
+        if not question:
+            return
+        if self._busy():
+            messagebox.showinfo("Busy", "Wait for the current task to finish.")
+            return
+        self._set_insights_busy(True)
+        self._insight_status("Thinking…")
+        self._set_answer("Searching your notes…")
+
+        def work():
+            try:
+                from zettelpal.insights import rag
+
+                result = rag.ask(question)
+                text = result["answer"]
+                if result["sources"]:
+                    text += "\n\nSources:\n" + "\n".join(
+                        f"  • {note['title']}" for note in result["sources"])
+                self.after(0, lambda: (self._set_answer(text), self._insight_status("")))
+            except Exception:
+                log.exception("Ask failed")
+                self.after(0, lambda: (
+                    self._set_answer("Something went wrong — see the Pipeline activity log."),
+                    self._insight_status("Ask failed.", "error")))
+            finally:
+                self.after(0, lambda: self._set_insights_busy(False))
+
+        self.insights_thread = threading.Thread(target=work, daemon=True)
+        self.insights_thread.start()
+
+    def gen_themes(self):
+        from zettelpal.insights import themes
+        self._run_generate(themes.generate_themes, "themes")
+
+    def gen_digest(self):
+        from zettelpal.insights import digest
+        self._run_generate(digest.generate_digest, "weekly digest")
+
+    def gen_resurface(self):
+        from zettelpal.insights import resurfacing
+        self._run_generate(resurfacing.resurface, "resurfaced notes")
+
+    def _run_generate(self, fn, label: str):
+        if self._busy():
+            messagebox.showinfo("Busy", "Wait for the current task to finish.")
+            return
+        self._set_insights_busy(True)
+        self._insight_status(f"Generating {label}…")
+
+        def work():
+            try:
+                path = fn()
+                if path:
+                    self.after(0, lambda: self._insight_status(
+                        f"Wrote {os.path.basename(path)}.", "ok"))
+                else:
+                    self.after(0, lambda: self._insight_status(
+                        f"No {label} yet — you may need more notes.", "warn"))
+            except Exception:
+                log.exception("%s generation failed", label)
+                self.after(0, lambda: self._insight_status(
+                    f"{label.capitalize()} failed — see the Pipeline activity log.", "error"))
+            finally:
+                self.after(0, lambda: self._set_insights_busy(False))
+
+        self.insights_thread = threading.Thread(target=work, daemon=True)
+        self.insights_thread.start()
 
     # -- settings view ---------------------------------------------------
 
@@ -375,10 +533,12 @@ class ZettelpalGUI(ctk.CTk):
     # -- view switching --------------------------------------------------
 
     def show_view(self, name: str):
-        if name == "settings":
-            self.settings_view.tkraise()
-        else:
-            self.pipeline_view.tkraise()
+        views = {
+            "settings": self.settings_view,
+            "insights": self.insights_view,
+            "pipeline": self.pipeline_view,
+        }
+        views.get(name, self.pipeline_view).tkraise()
         for key, btn in self.nav_buttons.items():
             if key == name:
                 btn.configure(fg_color=ACCENT, text_color=("#ffffff", "#ffffff"))
@@ -546,6 +706,12 @@ class ZettelpalGUI(ctk.CTk):
 
     # -- actions ---------------------------------------------------------
 
+    def _busy(self) -> bool:
+        for thread in (self.processing_thread, self.insights_thread):
+            if thread and thread.is_alive():
+                return True
+        return False
+
     def _set_busy(self, busy: bool):
         state = "disabled" if busy else "normal"
         self.start_button.configure(state=state)
@@ -554,6 +720,9 @@ class ZettelpalGUI(ctk.CTk):
     def start_pipeline(self):
         if not self.audio_files:
             messagebox.showinfo("No files", "Add audio files to process first.")
+            return
+        if self._busy():
+            messagebox.showinfo("Busy", "Wait for the current task to finish.")
             return
         manual_tags = ""  # manual tags removed from this view; tag in Obsidian
         for filepath in self.audio_files:
@@ -585,8 +754,8 @@ class ZettelpalGUI(ctk.CTk):
             config.settings.similarity_threshold = original
 
     def recalculate_links(self):
-        if self.processing_thread and self.processing_thread.is_alive():
-            messagebox.showinfo("Busy", "Wait for the current run to finish.")
+        if self._busy():
+            messagebox.showinfo("Busy", "Wait for the current task to finish.")
             return
         self._set_busy(True)
         threshold = self.threshold_var.get()
@@ -607,8 +776,8 @@ class ZettelpalGUI(ctk.CTk):
             self.after(0, lambda: self._set_busy(False))
 
     def quit_app(self):
-        if self.processing_thread and self.processing_thread.is_alive():
-            if not messagebox.askyesno("Confirm quit", "Processing is running. Quit anyway?"):
+        if self._busy():
+            if not messagebox.askyesno("Confirm quit", "A task is running. Quit anyway?"):
                 return
         self.destroy()
 

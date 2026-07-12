@@ -148,6 +148,90 @@ def gui(ctx: typer.Context):
     _launch_gui()
 
 
+insights_app = typer.Typer(
+    help="Reflect on your vault: themes, digests, resurfacing, and Q&A.",
+    no_args_is_help=True,
+)
+app.add_typer(insights_app, name="insights")
+
+
+def _prepare_insights(ctx: typer.Context):
+    setup_console_logging(verbose=ctx.obj["verbose"])
+
+
+@insights_app.command("themes")
+def insights_themes(
+    ctx: typer.Context,
+    clusters: int = typer.Option(None, "--clusters", "-k", min=1,
+                                 help="Number of themes (default: auto)."),
+):
+    """Cluster the vault into recurring themes and write Insights/Themes.md."""
+    from zettelpal.insights import themes
+
+    _prepare_insights(ctx)
+    path = themes.generate_themes(k=clusters)
+    if not path:
+        log.info("No notes to cluster.")
+        raise typer.Exit(1)
+    typer.echo(f"Wrote {path}")
+
+
+@insights_app.command("ask")
+def insights_ask(
+    ctx: typer.Context,
+    question: str = typer.Argument(..., help="A question to ask your notes."),
+    k: int = typer.Option(8, min=1, help="How many notes to retrieve."),
+    save: bool = typer.Option(False, "--save", help="Also write the answer to a note."),
+):
+    """Ask your own vault a question, answered from your notes."""
+    from zettelpal.insights import rag
+
+    _prepare_insights(ctx)
+    result = rag.ask(question, k=k, write=save)
+    typer.echo("")
+    typer.echo(result["answer"])
+    if result["sources"]:
+        typer.echo("\nSources:")
+        for note in result["sources"]:
+            typer.echo(f"  - {note['title']}")
+    if result["path"]:
+        typer.echo(f"\nSaved to {result['path']}")
+
+
+@insights_app.command("digest")
+def insights_digest(
+    ctx: typer.Context,
+    days: int = typer.Option(7, min=1, help="Window size in days."),
+):
+    """Summarize the last N days of notes into a digest note."""
+    from zettelpal.insights import digest
+
+    _prepare_insights(ctx)
+    path = digest.generate_digest(days=days)
+    if not path:
+        log.info("No notes in the last %d days.", days)
+        raise typer.Exit(1)
+    typer.echo(f"Wrote {path}")
+
+
+@insights_app.command("resurface")
+def insights_resurface(
+    ctx: typer.Context,
+    days: int = typer.Option(7, min=1, help="Treat notes newer than this as 'recent'."),
+    threshold: float = typer.Option(0.5, min=0.0, max=1.0,
+                                    help="Minimum similarity to resurface."),
+):
+    """Surface older notes related to what you wrote recently."""
+    from zettelpal.insights import resurfacing
+
+    _prepare_insights(ctx)
+    path = resurfacing.resurface(days=days, threshold=threshold)
+    if not path:
+        log.info("Nothing to resurface.")
+        raise typer.Exit(1)
+    typer.echo(f"Wrote {path}")
+
+
 def main():
     # Compatibility: `zettelpal recording.mp3` still works by rewriting it
     # to `zettelpal process recording.mp3`.

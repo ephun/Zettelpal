@@ -184,6 +184,9 @@ def find_all_markdown_files(directory: str) -> list[str]:
         return []
 
     excluded_dirs = set(config.settings.excluded_vault_dirs)
+    # Generated insight notes live in the vault but are never treated as entries.
+    if config.settings.insights_subdirectory:
+        excluded_dirs.add(config.settings.insights_subdirectory)
 
     cache_realpath = None
     if config.settings.embeddings_cache_file and os.path.exists(os.path.dirname(config.settings.embeddings_cache_file)):

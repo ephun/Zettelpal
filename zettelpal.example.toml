@@ -14,6 +14,9 @@
 #data_dir = ""
 # Where processed recordings are archived (default: <vault_root>/archive).
 #archive_dir = ""
+# Vault subfolder for generated insight notes (themes, digests, resurfacing,
+# saved Q&A). Kept out of your entries and excluded from linking/scanning.
+#insights_subdirectory = "Insights"
 
 # --- LLM backend ---
 # "local" keeps everything on your machines; "gemini" sends transcript text

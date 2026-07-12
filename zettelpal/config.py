@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     data_dir: str = Field(default_factory=app_root)
     # Where processed recordings are archived ("" = <vault_root>/archive).
     archive_dir: str = ""
+    # Subdirectory (within the vault) where generated insight notes are written.
+    # The vault root stays your own entries only; insights live here and are
+    # excluded from linking, scanning, and integrity checks.
+    insights_subdirectory: str = "Insights"
 
     # --- LLM backend ---
     # "local" keeps everything on your machines; "gemini" sends transcript
@@ -117,6 +121,10 @@ class Settings(BaseSettings):
         return self.archive_dir or os.path.join(self.vault_root, "archive")
 
     @property
+    def insights_dir(self) -> str:
+        return os.path.join(self.vault_root, self.insights_subdirectory)
+
+    @property
     def clips_dir(self) -> str:
         return os.path.join(self.resolved_archive_dir, "clips")
 
@@ -152,6 +160,7 @@ settings = Settings()
 USER_EDITABLE_KEYS = (
     "vault_root",
     "notes_subdirectory",
+    "insights_subdirectory",
     "llm_backend",
     "local_llm_base_url",
     "local_llm_model",
