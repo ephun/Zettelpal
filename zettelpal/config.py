@@ -147,6 +147,50 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# User-editable settings that the GUI exposes and persists to zettelpal.toml.
+# The Gemini API key is deliberately excluded — keep it in the environment.
+USER_EDITABLE_KEYS = (
+    "vault_root",
+    "notes_subdirectory",
+    "llm_backend",
+    "local_llm_base_url",
+    "local_llm_model",
+    "gemini_model",
+    "whisper_model_size",
+    "embedding_model",
+    "similarity_threshold",
+    "max_semantic_links_per_note",
+)
+
+
+def _toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def write_user_settings(values: dict) -> str:
+    """Persist the user-editable settings to zettelpal.toml and apply them to
+    the live `settings` object. Returns the path written."""
+    lines = [
+        "# Zettelpal settings - written by the app's Settings tab.",
+        "# Environment variables prefixed ZETTELPAL_ still override these.",
+        "",
+    ]
+    for key in USER_EDITABLE_KEYS:
+        if key not in values:
+            continue
+        value = values[key]
+        setattr(settings, key, value)  # apply live
+        lines.append(f"{key} = {_toml_value(value)}")
+    text = "\n".join(lines) + "\n"
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        f.write(text)
+    return CONFIG_FILE
+
 # =============================================================================
 # INTERNAL CONSTANTS (not user configuration)
 # =============================================================================

@@ -1,7 +1,7 @@
 # gui.py - Zettelpal desktop GUI (CustomTkinter).
 #
 # A control panel for the pipeline: queue recordings, watch them process in a
-# live log, and tune linking. The mind-map itself is viewed in Obsidian.
+# live log, and edit settings. The mind-map itself is viewed in Obsidian.
 
 import logging
 import os
@@ -18,8 +18,22 @@ from zettelpal.vault import linking
 
 log = get_logger(__name__)
 
-ctk.set_appearance_mode("System")
+ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+# Palette as (light, dark) tuples so both themes are deliberate, not inverted.
+ACCENT = ("#4f46e5", "#7d79ff")
+ACCENT_HOVER = ("#4338ca", "#6b66f2")
+WINDOW_BG = ("#eceef2", "#0f1116")
+SIDEBAR_BG = ("#ffffff", "#171a21")
+CARD_BG = ("#ffffff", "#1b1e26")
+FIELD_BG = ("#f4f5f8", "#242834")
+FIELD_HOVER = ("#eceef3", "#2b303c")
+TEXT = ("#1b1e26", "#e7e9ef")
+MUTED = ("#6b7280", "#949bab")
+BORDER = ("#e3e6eb", "#2b2f3a")
+
+WHISPER_SIZES = ["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"]
 
 
 class TkLogHandler(logging.Handler):
@@ -29,8 +43,8 @@ class TkLogHandler(logging.Handler):
     def __init__(self, widget):
         super().__init__()
         self.widget = widget
-        self.queue = queue.Queue()
         self.update_interval = 100
+        self.queue: queue.Queue = queue.Queue()
         self.widget.after(self.update_interval, self._drain)
 
     def emit(self, record):
@@ -72,8 +86,9 @@ class ZettelpalGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Zettelpal")
-        self.geometry("960x720")
-        self.minsize(780, 560)
+        self.geometry("1040x720")
+        self.minsize(900, 600)
+        self.configure(fg_color=WINDOW_BG)
 
         icon_path = os.path.join(os.path.dirname(__file__), "zettelpal.ico")
         if os.path.exists(icon_path):
@@ -85,171 +100,292 @@ class ZettelpalGUI(ctk.CTk):
         self.audio_files: list[str] = []
         self.processing_queue: queue.Queue = queue.Queue()
         self.processing_thread: threading.Thread | None = None
+        self.threshold_var = ctk.DoubleVar(value=config.settings.similarity_threshold)
+        self.nav_buttons: dict[str, ctk.CTkButton] = {}
+        self._setting_vars: dict[str, ctk.Variable] = {}
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self._build_header()
-        self._build_tabs()
+        self._build_sidebar()
+        self._build_pipeline_view()
+        self._build_settings_view()
         self._attach_logging()
+        self.show_view("pipeline")
         self._check_directories()
 
-    # ------------------------------------------------------------------ UI
+    # -- helpers ---------------------------------------------------------
 
-    def _build_header(self):
-        header = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=20, pady=(16, 0))
-        header.grid_columnconfigure(0, weight=1)
+    def _card(self, parent) -> ctk.CTkFrame:
+        return ctk.CTkFrame(parent, fg_color=CARD_BG, border_width=1,
+                            border_color=BORDER, corner_radius=12)
 
-        ctk.CTkLabel(
-            header, text="Zettelpal",
-            font=ctk.CTkFont(size=26, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            header, text="Turn recordings into a linked Obsidian mind-map.",
-            text_color=("gray50", "gray60"),
-        ).grid(row=1, column=0, sticky="w")
+    def _section_label(self, parent, text) -> ctk.CTkLabel:
+        return ctk.CTkLabel(parent, text=text, text_color=MUTED, anchor="w",
+                            font=ctk.CTkFont(size=12, weight="bold"))
 
-    def _build_tabs(self):
-        self.tabs = ctk.CTkTabview(self, corner_radius=12)
-        self.tabs.grid(row=1, column=0, sticky="nsew", padx=20, pady=16)
-        self.tabs.add("Pipeline")
-        self.tabs.add("Settings")
-        self._build_pipeline_tab(self.tabs.tab("Pipeline"))
-        self._build_settings_tab(self.tabs.tab("Settings"))
+    def _secondary_button(self, parent, text, command, width=120) -> ctk.CTkButton:
+        # Always visible at rest: filled field color + border, not transparent.
+        return ctk.CTkButton(
+            parent, text=text, command=command, width=width, height=34,
+            fg_color=FIELD_BG, hover_color=FIELD_HOVER, text_color=TEXT,
+            border_width=1, border_color=BORDER, corner_radius=8,
+        )
 
-    def _build_pipeline_tab(self, tab):
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)
+    # -- sidebar ---------------------------------------------------------
 
-        # --- Audio queue ---
-        files_frame = ctk.CTkFrame(tab)
-        files_frame.grid(row=0, column=0, sticky="ew", pady=(4, 10))
-        files_frame.grid_columnconfigure(0, weight=1)
+    def _build_sidebar(self):
+        bar = ctk.CTkFrame(self, width=212, corner_radius=0, fg_color=SIDEBAR_BG)
+        bar.grid(row=0, column=0, sticky="nsw")
+        bar.grid_propagate(False)
+        bar.grid_rowconfigure(3, weight=1)
 
         ctk.CTkLabel(
-            files_frame, text="Audio queue",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 4))
+            bar, text="Zettelpal", anchor="w",
+            font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT,
+        ).grid(row=0, column=0, sticky="ew", padx=20, pady=(22, 0))
+        ctk.CTkLabel(
+            bar, text="audio → mind-map", anchor="w",
+            font=ctk.CTkFont(size=12), text_color=MUTED,
+        ).grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
 
-        self.file_list = ctk.CTkScrollableFrame(files_frame, height=110)
-        self.file_list.grid(row=1, column=0, columnspan=3, sticky="ew", padx=12, pady=4)
+        nav = ctk.CTkFrame(bar, fg_color="transparent")
+        nav.grid(row=2, column=0, sticky="ew", padx=12)
+        for i, (key, label) in enumerate((("pipeline", "  Pipeline"), ("settings", "  Settings"))):
+            btn = ctk.CTkButton(
+                nav, text=label, anchor="w", height=40, corner_radius=8,
+                fg_color="transparent", text_color=TEXT, hover_color=FIELD_HOVER,
+                font=ctk.CTkFont(size=14), command=lambda k=key: self.show_view(k),
+            )
+            btn.grid(row=i, column=0, sticky="ew", pady=3)
+            nav.grid_columnconfigure(0, weight=1)
+            self.nav_buttons[key] = btn
+
+        footer = ctk.CTkFrame(bar, fg_color="transparent")
+        footer.grid(row=4, column=0, sticky="ew", padx=20, pady=18)
+        ctk.CTkLabel(footer, text="Appearance", text_color=MUTED,
+                     font=ctk.CTkFont(size=11), anchor="w").pack(anchor="w")
+        ctk.CTkOptionMenu(
+            footer, values=["Dark", "Light", "System"], width=160, height=30,
+            fg_color=FIELD_BG, button_color=FIELD_BG, button_hover_color=FIELD_HOVER,
+            text_color=TEXT, command=ctk.set_appearance_mode,
+        ).pack(anchor="w", pady=(4, 0))
+
+    # -- pipeline view ---------------------------------------------------
+
+    def _build_pipeline_view(self):
+        view = ctk.CTkFrame(self, fg_color="transparent")
+        view.grid(row=0, column=1, sticky="nsew", padx=28, pady=24)
+        view.grid_columnconfigure(0, weight=1)
+        view.grid_rowconfigure(2, weight=1)
+        self.pipeline_view = view
+
+        ctk.CTkLabel(view, text="Pipeline", anchor="w", text_color=TEXT,
+                     font=ctk.CTkFont(size=26, weight="bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 16))
+
+        # Queue card
+        queue_card = self._card(view)
+        queue_card.grid(row=1, column=0, sticky="ew")
+        queue_card.grid_columnconfigure(0, weight=1)
+        self._section_label(queue_card, "AUDIO QUEUE").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(14, 6))
+        self.file_list = ctk.CTkScrollableFrame(
+            queue_card, height=118, fg_color=FIELD_BG, corner_radius=8)
+        self.file_list.grid(row=1, column=0, sticky="ew", padx=14, pady=2)
         self.file_list.grid_columnconfigure(0, weight=1)
-        self._empty_hint = ctk.CTkLabel(
-            self.file_list, text="No files queued. Click “Add files…”.",
-            text_color=("gray55", "gray55"),
-        )
-        self._empty_hint.grid(row=0, column=0, sticky="w", padx=4, pady=6)
 
-        btns = ctk.CTkFrame(files_frame, fg_color="transparent")
-        btns.grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 12))
-        ctk.CTkButton(btns, text="Add files…", width=110, command=self.add_files).pack(side="left")
-        ctk.CTkButton(
-            btns, text="Add folder…", width=110, command=self.add_folder,
-            fg_color="transparent", border_width=1,
-        ).pack(side="left", padx=(8, 0))
-        ctk.CTkButton(
-            btns, text="Clear", width=80, command=self.clear_files,
-            fg_color="transparent", border_width=1,
-        ).pack(side="left", padx=(8, 0))
+        actions = ctk.CTkFrame(queue_card, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="ew", padx=14, pady=(10, 14))
+        ctk.CTkButton(actions, text="Add files", width=110, height=34, corner_radius=8,
+                      fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                      command=self.add_files).pack(side="left")
+        self._secondary_button(actions, "Add folder", self.add_folder).pack(side="left", padx=8)
+        self._secondary_button(actions, "Clear", self.clear_files, width=90).pack(side="left")
 
-        # --- Console ---
-        console_frame = ctk.CTkFrame(tab)
-        console_frame.grid(row=1, column=0, sticky="nsew")
-        console_frame.grid_columnconfigure(0, weight=1)
-        console_frame.grid_rowconfigure(1, weight=1)
-        ctk.CTkLabel(
-            console_frame, text="Activity",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 4))
+        # Activity card
+        log_card = self._card(view)
+        log_card.grid(row=2, column=0, sticky="nsew", pady=(16, 0))
+        log_card.grid_columnconfigure(0, weight=1)
+        log_card.grid_rowconfigure(1, weight=1)
+        self._section_label(log_card, "ACTIVITY").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(14, 6))
         self.console = ctk.CTkTextbox(
-            console_frame, state="disabled", wrap="word",
-            font=ctk.CTkFont(family="Consolas", size=12),
+            log_card, state="disabled", wrap="word", fg_color=FIELD_BG,
+            corner_radius=8, font=ctk.CTkFont(family="Consolas", size=12),
         )
-        self.console.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.console.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
 
-        # --- Controls ---
-        controls = ctk.CTkFrame(tab, fg_color="transparent")
-        controls.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        # Controls
+        controls = ctk.CTkFrame(view, fg_color="transparent")
+        controls.grid(row=3, column=0, sticky="ew", pady=(18, 0))
         controls.grid_columnconfigure(0, weight=1)
-
         self.start_button = ctk.CTkButton(
-            controls, text="Start pipeline", height=40,
-            font=ctk.CTkFont(size=14, weight="bold"), command=self.start_pipeline,
-        )
+            controls, text="Start pipeline", height=44, corner_radius=10,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            font=ctk.CTkFont(size=15, weight="bold"), command=self.start_pipeline)
         self.start_button.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(
-            controls, text="Clear log", width=110, command=self.clear_console,
-            fg_color="transparent", border_width=1,
-        ).grid(row=0, column=1, padx=(10, 0))
+        self._secondary_button(controls, "Clear log", self.clear_console, width=110).grid(
+            row=0, column=1, padx=(12, 0))
 
-    def _build_settings_tab(self, tab):
-        tab.grid_columnconfigure(1, weight=1)
-        pad = {"padx": 14, "pady": 8}
-        row = 0
+    # -- settings view ---------------------------------------------------
 
-        ctk.CTkLabel(tab, text="LLM backend").grid(row=row, column=0, sticky="w", **pad)
-        backend_row = ctk.CTkFrame(tab, fg_color="transparent")
-        backend_row.grid(row=row, column=1, sticky="w", **pad)
+    def _build_settings_view(self):
+        view = ctk.CTkFrame(self, fg_color="transparent")
+        view.grid(row=0, column=1, sticky="nsew", padx=28, pady=24)
+        view.grid_columnconfigure(0, weight=1)
+        view.grid_rowconfigure(1, weight=1)
+        self.settings_view = view
+
+        ctk.CTkLabel(view, text="Settings", anchor="w", text_color=TEXT,
+                     font=ctk.CTkFont(size=26, weight="bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 16))
+
+        form = ctk.CTkScrollableFrame(view, fg_color="transparent")
+        form.grid(row=1, column=0, sticky="nsew")
+        form.grid_columnconfigure(0, weight=1)
+
+        # --- Vault group ---
+        vault_card = self._card(form)
+        vault_card.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        vault_card.grid_columnconfigure(0, weight=1)
+        self._section_label(vault_card, "VAULT").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(14, 8))
+        vault_row = ctk.CTkFrame(vault_card, fg_color="transparent")
+        vault_row.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 6))
+        vault_row.grid_columnconfigure(0, weight=1)
+        self.vault_entry = self._make_entry(vault_row, config.settings.vault_root)
+        self.vault_entry.grid(row=0, column=0, sticky="ew")
+        self._setting_vars["vault_root"] = self.vault_entry
+        self._secondary_button(vault_row, "Browse", self._browse_vault, width=90).grid(
+            row=0, column=1, padx=(8, 0))
+        self._labeled_entry(vault_card, 2, "Notes subfolder (blank = vault root)",
+                            "notes_subdirectory", config.settings.notes_subdirectory)
+
+        # --- Models group ---
+        models_card = self._card(form)
+        models_card.grid(row=1, column=0, sticky="ew", pady=(0, 14))
+        models_card.grid_columnconfigure(1, weight=1)
+        self._section_label(models_card, "MODELS & BACKEND").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=18, pady=(14, 8))
+
+        self._form_label(models_card, 1, "LLM backend")
         self.backend_var = ctk.StringVar(value=config.settings.llm_backend)
         ctk.CTkOptionMenu(
-            backend_row, values=["local", "gemini"], variable=self.backend_var,
-            width=140, command=self.on_backend_change,
-        ).pack(side="left")
-        self.backend_status = ctk.CTkLabel(backend_row, text="", text_color=("gray45", "gray60"))
-        self.backend_status.pack(side="left", padx=(10, 0))
-        row += 1
+            models_card, values=["local", "gemini"], variable=self.backend_var,
+            width=160, fg_color=FIELD_BG, button_color=FIELD_BG,
+            button_hover_color=FIELD_HOVER, text_color=TEXT,
+            command=self.on_backend_change,
+        ).grid(row=1, column=1, sticky="w", padx=(0, 18), pady=6)
+        self._setting_vars["llm_backend"] = self.backend_var
 
-        ctk.CTkLabel(tab, text="Manual tags").grid(row=row, column=0, sticky="w", **pad)
-        self.tags_entry = ctk.CTkEntry(tab, placeholder_text="comma,separated,tags")
-        self.tags_entry.grid(row=row, column=1, sticky="ew", **pad)
-        row += 1
+        self._grid_entry(models_card, 2, "Local LLM URL", "local_llm_base_url",
+                         config.settings.local_llm_base_url)
+        self._grid_entry(models_card, 3, "Local LLM model", "local_llm_model",
+                         config.settings.local_llm_model)
+        self._grid_entry(models_card, 4, "Gemini model", "gemini_model",
+                         config.settings.gemini_model)
 
-        ctk.CTkLabel(tab, text="Similarity threshold").grid(row=row, column=0, sticky="w", **pad)
-        threshold_row = ctk.CTkFrame(tab, fg_color="transparent")
-        threshold_row.grid(row=row, column=1, sticky="ew", **pad)
-        threshold_row.grid_columnconfigure(1, weight=1)
-        self.threshold_var = ctk.DoubleVar(value=config.settings.similarity_threshold)
-        self.threshold_label = ctk.CTkLabel(threshold_row, text=f"{self.threshold_var.get():.2f}", width=40)
-        self.threshold_label.grid(row=0, column=0, padx=(0, 10))
-        ctk.CTkSlider(
-            threshold_row, from_=0.0, to=1.0, variable=self.threshold_var,
-            command=self.update_threshold_label,
-        ).grid(row=0, column=1, sticky="ew")
-        row += 1
-
-        ctk.CTkLabel(tab, text="Appearance").grid(row=row, column=0, sticky="w", **pad)
+        self._form_label(models_card, 5, "Whisper model")
+        self.whisper_var = ctk.StringVar(value=config.settings.whisper_model_size)
         ctk.CTkOptionMenu(
-            tab, values=["System", "Light", "Dark"], width=140,
-            command=ctk.set_appearance_mode,
-        ).grid(row=row, column=1, sticky="w", **pad)
-        row += 1
+            models_card, values=WHISPER_SIZES, variable=self.whisper_var, width=160,
+            fg_color=FIELD_BG, button_color=FIELD_BG, button_hover_color=FIELD_HOVER,
+            text_color=TEXT,
+        ).grid(row=5, column=1, sticky="w", padx=(0, 18), pady=6)
+        self._setting_vars["whisper_model_size"] = self.whisper_var
 
-        self.relink_button = ctk.CTkButton(
-            tab, text="Recalculate all links", command=self.recalculate_links,
-        )
-        self.relink_button.grid(row=row, column=0, columnspan=2, sticky="w", padx=14, pady=(18, 8))
-        row += 1
+        self._grid_entry(models_card, 6, "Embedding model", "embedding_model",
+                         config.settings.embedding_model)
 
-        self.info_label = ctk.CTkLabel(
-            tab, justify="left", text_color=("gray40", "gray60"),
-            font=ctk.CTkFont(family="Consolas", size=12),
-        )
-        self.info_label.grid(row=row, column=0, columnspan=2, sticky="w", padx=14, pady=(16, 8))
-        self._refresh_info()
+        self.gemini_status = ctk.CTkLabel(models_card, text="", text_color=MUTED,
+                                          font=ctk.CTkFont(size=12), anchor="w")
+        self.gemini_status.grid(row=7, column=0, columnspan=2, sticky="w",
+                                padx=18, pady=(2, 14))
+
+        # --- Linking group ---
+        link_card = self._card(form)
+        link_card.grid(row=2, column=0, sticky="ew", pady=(0, 14))
+        link_card.grid_columnconfigure(1, weight=1)
+        self._section_label(link_card, "LINKING").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=18, pady=(14, 8))
+
+        self._form_label(link_card, 1, "Similarity threshold")
+        thresh_row = ctk.CTkFrame(link_card, fg_color="transparent")
+        thresh_row.grid(row=1, column=1, sticky="ew", padx=(0, 18), pady=6)
+        thresh_row.grid_columnconfigure(1, weight=1)
+        self.threshold_label = ctk.CTkLabel(thresh_row, text=f"{self.threshold_var.get():.2f}",
+                                            width=42, text_color=TEXT)
+        self.threshold_label.grid(row=0, column=0, padx=(0, 10))
+        ctk.CTkSlider(thresh_row, from_=0.0, to=1.0, variable=self.threshold_var,
+                      button_color=ACCENT, button_hover_color=ACCENT_HOVER,
+                      progress_color=ACCENT, command=self.update_threshold_label).grid(
+            row=0, column=1, sticky="ew")
+
+        self._grid_entry(link_card, 2, "Max semantic links / note",
+                         "max_semantic_links_per_note",
+                         str(config.settings.max_semantic_links_per_note))
+        self.relink_button = self._secondary_button(
+            link_card, "Recalculate all links", self.recalculate_links, width=190)
+        self.relink_button.grid(row=3, column=0, columnspan=2, sticky="w",
+                                padx=18, pady=(4, 14))
+
+        # --- Save bar ---
+        save_bar = ctk.CTkFrame(form, fg_color="transparent")
+        save_bar.grid(row=3, column=0, sticky="ew", pady=(2, 8))
+        ctk.CTkButton(save_bar, text="Save settings", height=40, corner_radius=10,
+                      fg_color=ACCENT, hover_color=ACCENT_HOVER, width=150,
+                      font=ctk.CTkFont(size=14, weight="bold"),
+                      command=self.save_settings).pack(side="left")
+        self.save_status = ctk.CTkLabel(save_bar, text="", text_color=MUTED,
+                                        font=ctk.CTkFont(size=12))
+        self.save_status.pack(side="left", padx=14)
+
         self.update_backend_status()
 
-    def _refresh_info(self):
-        gemini = "(API key set)" if config.settings.gemini_api_key else "(no API key)"
-        self.info_label.configure(text="\n".join([
-            f"Vault:      {config.settings.vault_root}",
-            f"Local LLM:  {config.settings.local_llm_base_url} ({config.settings.local_llm_model})",
-            f"Gemini:     {config.settings.gemini_model} {gemini}",
-            f"Whisper:    {config.settings.whisper_model_size}",
-            f"Embeddings: {config.settings.embedding_model}",
-        ]))
+    # small form builders
 
-    # -------------------------------------------------------------- logging
+    def _make_entry(self, parent, value) -> ctk.CTkEntry:
+        entry = ctk.CTkEntry(parent, height=34, corner_radius=8, fg_color=FIELD_BG,
+                             border_color=BORDER, text_color=TEXT)
+        if value:
+            entry.insert(0, str(value))
+        return entry
+
+    def _form_label(self, parent, row, text):
+        ctk.CTkLabel(parent, text=text, text_color=TEXT, anchor="w").grid(
+            row=row, column=0, sticky="w", padx=18, pady=6)
+
+    def _grid_entry(self, parent, row, label, key, value):
+        self._form_label(parent, row, label)
+        entry = self._make_entry(parent, value)
+        entry.grid(row=row, column=1, sticky="ew", padx=(0, 18), pady=6)
+        self._setting_vars[key] = entry
+
+    def _labeled_entry(self, parent, row, label, key, value):
+        wrap = ctk.CTkFrame(parent, fg_color="transparent")
+        wrap.grid(row=row, column=0, sticky="ew", padx=14, pady=(0, 12))
+        wrap.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(wrap, text=label, text_color=MUTED, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, sticky="w", pady=(0, 2))
+        entry = self._make_entry(wrap, value)
+        entry.grid(row=1, column=0, sticky="ew")
+        self._setting_vars[key] = entry
+
+    # -- view switching --------------------------------------------------
+
+    def show_view(self, name: str):
+        if name == "settings":
+            self.settings_view.tkraise()
+        else:
+            self.pipeline_view.tkraise()
+        for key, btn in self.nav_buttons.items():
+            if key == name:
+                btn.configure(fg_color=ACCENT, text_color=("#ffffff", "#ffffff"))
+            else:
+                btn.configure(fg_color="transparent", text_color=TEXT)
+
+    # -- logging & setup -------------------------------------------------
 
     def _attach_logging(self):
         logger = logging.getLogger(LOGGER_NAME)
@@ -271,46 +407,41 @@ class ZettelpalGUI(ctk.CTk):
                 config.settings.clips_dir,
             ):
                 os.makedirs(path, exist_ok=True)
-
             if not os.path.exists(config.settings.vault_root):
                 log.error(f"Obsidian vault not found: {config.settings.vault_root}")
-                messagebox.showerror(
-                    "Configuration Error",
+                messagebox.showwarning(
+                    "Vault not found",
                     f"Obsidian vault not found:\n{config.settings.vault_root}\n\n"
-                    "Set vault_root in zettelpal.toml or the ZETTELPAL_VAULT_ROOT "
-                    "environment variable.",
+                    "Set it in the Settings tab and click Save.",
                 )
+                self.show_view("settings")
                 return
             os.makedirs(config.settings.notes_dir, exist_ok=True)
             os.makedirs(os.path.dirname(config.settings.embeddings_cache_file), exist_ok=True)
             log.info(f"Ready. Backend: {config.settings.llm_backend}.")
         except OSError as e:
             log.error(f"Directory setup failed: {e}")
-            messagebox.showerror("Setup Error", str(e))
 
-    # ------------------------------------------------------------- queue UI
+    # -- queue UI --------------------------------------------------------
 
     def _render_file_list(self):
         for widget in self.file_list.winfo_children():
             widget.destroy()
         if not self.audio_files:
-            self._empty_hint = ctk.CTkLabel(
-                self.file_list, text="No files queued. Click “Add files…”.",
-                text_color=("gray55", "gray55"),
-            )
-            self._empty_hint.grid(row=0, column=0, sticky="w", padx=4, pady=6)
+            ctk.CTkLabel(self.file_list, text="No files queued — add files or a folder.",
+                         text_color=MUTED, anchor="w").grid(
+                row=0, column=0, sticky="w", padx=6, pady=8)
             return
         for index, path in enumerate(self.audio_files):
             row = ctk.CTkFrame(self.file_list, fg_color="transparent")
             row.grid(row=index, column=0, sticky="ew", pady=2)
             row.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(row, text=os.path.basename(path), anchor="w").grid(
-                row=0, column=0, sticky="ew", padx=(4, 0)
-            )
-            ctk.CTkButton(
-                row, text="✕", width=28, height=24, fg_color="transparent",
-                border_width=1, command=lambda p=path: self.remove_file(p),
-            ).grid(row=0, column=1, padx=4)
+            ctk.CTkLabel(row, text=os.path.basename(path), anchor="w",
+                         text_color=TEXT).grid(row=0, column=0, sticky="ew", padx=(6, 0))
+            ctk.CTkButton(row, text="✕", width=28, height=26, corner_radius=6,
+                          fg_color=FIELD_HOVER, hover_color=("#e5484d", "#e5484d"),
+                          text_color=TEXT, command=lambda p=path: self.remove_file(p)).grid(
+                row=0, column=1, padx=4)
 
     def _queue_path(self, filepath: str):
         filename = os.path.basename(filepath)
@@ -327,10 +458,8 @@ class ZettelpalGUI(ctk.CTk):
     def add_files(self):
         files = filedialog.askopenfilenames(
             title="Select audio files",
-            filetypes=[
-                ("Audio files", "*.mp3 *.wav *.flac *.m4a *.ogg *.wma *.aac *.webm *.mp4"),
-                ("All files", "*.*"),
-            ],
+            filetypes=[("Audio files", "*.mp3 *.wav *.flac *.m4a *.ogg *.wma *.aac *.webm *.mp4"),
+                       ("All files", "*.*")],
         )
         for filepath in files:
             self._queue_path(filepath)
@@ -362,7 +491,7 @@ class ZettelpalGUI(ctk.CTk):
         self.console.delete("1.0", "end")
         self.console.configure(state="disabled")
 
-    # --------------------------------------------------------------- events
+    # -- settings events -------------------------------------------------
 
     def update_threshold_label(self, _=None):
         self.threshold_label.configure(text=f"{self.threshold_var.get():.2f}")
@@ -370,37 +499,66 @@ class ZettelpalGUI(ctk.CTk):
     def on_backend_change(self, _=None):
         config.settings.llm_backend = self.backend_var.get()
         self.update_backend_status()
-        self._refresh_info()
-        log.info(f"[SETTINGS] LLM backend changed to: {self.backend_var.get()}")
 
     def update_backend_status(self):
         if self.backend_var.get() == "gemini":
             if config.settings.gemini_api_key:
-                self.backend_status.configure(text="API key set", text_color=("green", "#4ade80"))
+                self.gemini_status.configure(
+                    text="Gemini API key detected in environment.",
+                    text_color=("#15803d", "#4ade80"))
             else:
-                self.backend_status.configure(text="No API key!", text_color=("#b91c1c", "#f87171"))
+                self.gemini_status.configure(
+                    text="No Gemini API key — set GEMINI_API_KEY in your environment.",
+                    text_color=("#b91c1c", "#f87171"))
         else:
-            self.backend_status.configure(
-                text=config.settings.local_llm_model, text_color=("gray45", "gray60")
-            )
+            self.gemini_status.configure(
+                text="Local backend — nothing leaves your machines.", text_color=MUTED)
+
+    def save_settings(self):
+        values = {}
+        for key, var in self._setting_vars.items():
+            raw = var.get().strip() if hasattr(var, "get") else var
+            values[key] = raw
+        values["similarity_threshold"] = round(self.threshold_var.get(), 3)
+        try:
+            values["max_semantic_links_per_note"] = int(
+                values.get("max_semantic_links_per_note", 10))
+        except (TypeError, ValueError):
+            self.save_status.configure(text="Max links must be a whole number.",
+                                       text_color=("#b91c1c", "#f87171"))
+            return
+        try:
+            path = config.write_user_settings(values)
+        except OSError as e:
+            self.save_status.configure(text=f"Could not save: {e}",
+                                       text_color=("#b91c1c", "#f87171"))
+            return
+        self.update_backend_status()
+        self.save_status.configure(text=f"Saved to {os.path.basename(path)}.",
+                                   text_color=("#15803d", "#4ade80"))
+        log.info(f"[SETTINGS] Saved to {path}")
+
+    def _browse_vault(self):
+        folder = filedialog.askdirectory(title="Select your Obsidian vault")
+        if folder:
+            self.vault_entry.delete(0, "end")
+            self.vault_entry.insert(0, folder)
+
+    # -- actions ---------------------------------------------------------
 
     def _set_busy(self, busy: bool):
         state = "disabled" if busy else "normal"
         self.start_button.configure(state=state)
         self.relink_button.configure(state=state)
 
-    # -------------------------------------------------------------- actions
-
     def start_pipeline(self):
         if not self.audio_files:
             messagebox.showinfo("No files", "Add audio files to process first.")
             return
-        manual_tags = self.tags_entry.get().strip()
+        manual_tags = ""  # manual tags removed from this view; tag in Obsidian
         for filepath in self.audio_files:
             self.processing_queue.put((filepath, manual_tags))
         self.clear_files()
-        self.tags_entry.delete(0, "end")
-
         self._set_busy(True)
         log.info("\n" + "=" * 50 + "\nSTARTING PIPELINE\n" + "=" * 50)
         self.processing_thread = threading.Thread(target=self._process_queue, daemon=True)
@@ -434,8 +592,7 @@ class ZettelpalGUI(ctk.CTk):
         threshold = self.threshold_var.get()
         log.info(f"\nRecalculating all links (threshold: {threshold:.2f})...")
         self.processing_thread = threading.Thread(
-            target=self._relink_thread, args=(threshold,), daemon=True
-        )
+            target=self._relink_thread, args=(threshold,), daemon=True)
         self.processing_thread.start()
 
     def _relink_thread(self, threshold: float):
