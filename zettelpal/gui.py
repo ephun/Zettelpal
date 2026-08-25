@@ -3,6 +3,7 @@
 # A control panel for the pipeline: queue recordings, watch them process in a
 # live log, and edit settings. The mind-map itself is viewed in Obsidian.
 
+import io
 import logging
 import os
 import queue
@@ -64,10 +65,18 @@ class TkLogHandler(logging.Handler):
             self.widget.after(self.update_interval, self._drain)
 
 
-class StreamToLogger:
+class StreamToLogger(io.TextIOBase):
     """File-like shim so third-party writes to stdout/stderr (Whisper progress,
     tracebacks) reach the log — and don't crash under pythonw, where the real
-    streams are missing."""
+    streams are missing.
+
+    Subclasses TextIOBase so libraries that probe the stream get real answers
+    instead of AttributeError: tqdm (via transformers/sentence-transformers)
+    calls isatty(), others call fileno() or check encoding.
+    """
+
+    encoding = "utf-8"
+    errors = "replace"
 
     def __init__(self, level: int):
         self.level = level
@@ -75,9 +84,16 @@ class StreamToLogger:
     def write(self, text):
         if text and text.strip():
             log.log(self.level, text.rstrip())
+        return len(text)
 
     def flush(self):
         pass
+
+    def isatty(self):
+        return False
+
+    def writable(self):
+        return True
 
 
 class ZettelpalGUI(ctk.CTk):
