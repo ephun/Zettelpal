@@ -10,7 +10,7 @@ import time
 from collections import Counter, defaultdict
 
 from zettelpal import config
-from zettelpal.vault.notes import read_note
+from zettelpal.vault.notes import find_all_markdown_files, read_note
 
 
 def stamp():
@@ -43,22 +43,15 @@ def run_check(
 
     notes = []
     unreadable = []
-    excluded_dirs = set(config.settings.excluded_vault_dirs)
-    for root, dirs, files in os.walk(vault_root):
-        dirs[:] = [
-            dirname for dirname in dirs
-            if dirname not in excluded_dirs
-            and "trash" not in dirname.lower()
-            and "quarantine" not in dirname.lower()
-        ]
-        for filename in files:
-            if filename.lower().endswith(".md"):
-                filepath = os.path.join(root, filename)
-                note = read_note(filepath, vault_root)
-                if note["read_error"]:
-                    unreadable.append(note)
-                    continue
-                notes.append(note)
+    # The shared walk, so the linter sees exactly the notes the rest of the
+    # pipeline treats as entries - generated insight notes included, which this
+    # scan used to lint as if the user had written them.
+    for filepath in find_all_markdown_files(vault_root):
+        note = read_note(filepath, vault_root)
+        if note["read_error"]:
+            unreadable.append(note)
+            continue
+        notes.append(note)
 
     issues = []
     for note in unreadable:
