@@ -1,4 +1,6 @@
+import builtins
 import datetime
+import os
 
 from zettelpal.vault import integrity
 
@@ -101,3 +103,26 @@ def test_validate_source_integrity_flags_missing_key(sandbox):
     issues = integrity.validate_source_integrity(str(vault), "01012601")
     codes = {code for _, code in issues}
     assert "missing_tags" in codes
+
+
+def test_integrity_survives_unreadable_note(sandbox, monkeypatch):
+    """One unreadable file used to abort the whole source integrity step with
+    OSError (seen as '[Errno 22] Invalid argument' on a network vault)."""
+    vault = sandbox / "vault"
+    base = datetime.datetime(2026, 1, 1, 12, 0, 0)
+    _note(vault, "Good - 20260101120000.md", "01012601", base,
+          "A perfectly well-formed note body with plenty of text in it.")
+    bad = _note(vault, "Bad - 20260101120100.md", "01012601",
+                base + datetime.timedelta(minutes=1), "Another note body entirely.")
+
+    real_open = builtins.open
+
+    def refuse_one(file, *args, **kwargs):
+        if os.path.abspath(str(file)) == os.path.abspath(str(bad)):
+            raise OSError(22, "Invalid argument")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", refuse_one)
+
+    assert integrity.validate_source_integrity(str(vault), "01012601") == []
+    assert integrity.quarantine_duplicate_notes_for_source(str(vault), "01012601") == []

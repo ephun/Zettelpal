@@ -130,9 +130,21 @@ def split_body_and_generated_links(content_lines: list[str]) -> tuple[str, list[
 
 
 def read_note(filepath: str, vault_root: str) -> dict:
-    """Reads a note into a structured dict (see keys below)."""
-    with open(filepath, "r", encoding="utf-8-sig", errors="replace") as file:
-        lines = file.readlines()
+    """Reads a note into a structured dict (see keys below).
+
+    An unreadable file yields an empty note with read_error set rather than
+    raising - the same contract extract_frontmatter_and_body() already has, so
+    one bad file (a name the OS refuses to open, a dropped network share) can
+    never abort a scan of the whole vault.
+    """
+    read_error = ""
+    lines: list[str] = []
+    try:
+        with open(filepath, "r", encoding="utf-8-sig", errors="replace") as file:
+            lines = file.readlines()
+    except OSError as e:
+        read_error = f"unreadable: {e}"
+        log.error(f"Error reading file {filepath}: {e}")
 
     frontmatter, body_start, frontmatter_error = split_frontmatter(lines)
     body, generated_link_lines, has_link_markers = split_body_and_generated_links(
@@ -162,6 +174,7 @@ def read_note(filepath: str, vault_root: str) -> dict:
         "stem": stem,
         "frontmatter": frontmatter,
         "frontmatter_error": frontmatter_error,
+        "read_error": read_error,
         "body": body,
         "body_norm": normalize_body(body),
         "body_len": len(body.strip()),

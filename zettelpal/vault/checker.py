@@ -42,6 +42,7 @@ def run_check(
     log(f"Scanning vault: {vault_root}")
 
     notes = []
+    unreadable = []
     excluded_dirs = set(config.settings.excluded_vault_dirs)
     for root, dirs, files in os.walk(vault_root):
         dirs[:] = [
@@ -53,9 +54,15 @@ def run_check(
         for filename in files:
             if filename.lower().endswith(".md"):
                 filepath = os.path.join(root, filename)
-                notes.append(read_note(filepath, vault_root))
+                note = read_note(filepath, vault_root)
+                if note["read_error"]:
+                    unreadable.append(note)
+                    continue
+                notes.append(note)
 
     issues = []
+    for note in unreadable:
+        add_issue(issues, "error", "unreadable_file", note["relpath"], note["read_error"])
     by_stem = defaultdict(list)
     by_norm_body = defaultdict(list)
     by_source = defaultdict(list)

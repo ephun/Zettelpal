@@ -10,7 +10,7 @@ from collections import defaultdict
 
 from zettelpal import config
 from zettelpal.vault import cache as vault_cache
-from zettelpal.vault.notes import read_note
+from zettelpal.vault.notes import find_all_markdown_files, read_note
 
 
 def canonical_dir(path: str) -> str:
@@ -27,17 +27,19 @@ def is_relative_to(child_path: str, parent_dir: str) -> bool:
 
 
 def _iter_source_notes(vault_root: str, recording_id: str) -> list[dict]:
+    """Every readable note in the vault that came from this recording.
+
+    Uses the shared vault walk so excluded directories (.git, .obsidian,
+    .trash, the quarantine folder, generated insights) are pruned here exactly
+    as they are everywhere else.
+    """
     notes = []
-    for root, _, files in os.walk(vault_root):
-        if os.path.basename(root) == ".obsidian":
+    for filepath in find_all_markdown_files(vault_root):
+        note = read_note(filepath, vault_root)
+        if note["read_error"]:
             continue
-        for filename in files:
-            if not filename.lower().endswith(".md"):
-                continue
-            filepath = os.path.join(root, filename)
-            note = read_note(filepath, vault_root)
-            if note["source"] == recording_id:
-                notes.append(note)
+        if note["source"] == recording_id:
+            notes.append(note)
     return notes
 
 

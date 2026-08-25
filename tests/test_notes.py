@@ -73,3 +73,13 @@ def test_generated_links_extracted(sandbox):
     note = notes.read_note(path, str(vault))
     assert "Neighbor - 20260101120100" in note["generated_links"]
     assert note["has_link_markers"] is True
+
+
+def test_read_note_unreadable_file_is_not_fatal(sandbox):
+    """A file the OS refuses to open must not raise - callers scanning a whole
+    vault would lose every other note to one bad file."""
+    vault = sandbox / "vault"
+    note = notes.read_note(str(vault / "Gone - 20260101120000.md"), str(vault))
+    assert note["read_error"]
+    assert note["body"] == ""
+    assert note["source"] is None
