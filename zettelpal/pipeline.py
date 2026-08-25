@@ -188,7 +188,10 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
         else:
             log.info("Source integrity check passed.")
     except Exception as e:
-        log.warning(f"Warning: Source integrity check failed: {e}")
+        # exc_info: these handlers are wide on purpose (a failed check must not
+        # cost the user their notes), but without the traceback the message
+        # names neither the file nor the call that failed.
+        log.warning(f"Warning: Source integrity check failed: {e}", exc_info=True)
 
     # === STEP 6: SEMANTIC LINKING ===
     log.info("\n--- Step 6: Semantic Linking ---")
@@ -209,7 +212,7 @@ def run_pipeline(audio_filepath: str, manual_tags: str = "") -> bool:
         else:
             log.info("Skipped: No notes for linking.")
     except Exception as e:
-        log.warning(f"Warning: Linking error: {e}")
+        log.warning(f"Warning: Linking error: {e}", exc_info=True)
 
     # === STEP 7: ARCHIVE & CLEANUP ===
     log.info("\n--- Step 7: Archive & Cleanup ---")
